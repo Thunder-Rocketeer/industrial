@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/*
+ * Design foundations.
+ *
+ * Spec section 20 calls for a modern industrial SaaS aesthetic: clean, dense,
+ * strong hierarchy, minimal noise. The full status-colour system and component
+ * tokens are introduced with the app shell; this file holds only what the
+ * whole application depends on.
+ *
+ * Typography note: the project deliberately uses a system font stack rather
+ * than `next/font/google`. Google Fonts are fetched at build time, which makes
+ * builds fail in offline and network-restricted environments and adds an
+ * external dependency for no visual gain in a dense data UI. System fonts also
+ * render instantly with no layout shift. To adopt a bespoke typeface later,
+ * self-host the woff2 files and use `next/font/local`.
+ */
+
+@theme {
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono:
+    ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, Monaco, Consolas,
+    monospace;
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/*
+ * Spec section 19: respect the user's reduced-motion preference. Applied
+ * globally so no individual component has to remember to honour it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,74 @@
+# ==============================================================================
+# Tooling configuration for the FastAPI backend.
+#
+# Dependencies are declared in requirements.txt rather than here: the project is
+# an application, not a distributable package, so a plain pinned requirements
+# file keeps the install path obvious.
+# ==============================================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["app", "tests"]
+exclude = [".venv", "__pycache__", ".pytest_cache", ".ruff_cache"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (import ordering)
+    "B",    # flake8-bugbear (likely bugs)
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade (modern syntax)
+    "N",    # pep8-naming
+    "ASYNC",# flake8-async (blocking calls in async code - spec section 23)
+    "S",    # flake8-bandit (security - spec sections 57 and 65)
+    "T20",  # flake8-print (no stray print(); use structured logging)
+    "SIM",  # flake8-simplify
+    "RET",  # flake8-return
+    "ARG",  # unused arguments
+    "PTH",  # prefer pathlib
+    "ERA",  # commented-out code (spec section 47: no dead code)
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "B008",  # FastAPI's Depends()/Query() in defaults is the required idiom.
+    "S101",  # assert is how pytest expresses expectations.
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests deliberately contain hard-coded credentials, tokens and injection
+# payloads as fixtures; bandit's secret and assert rules do not apply there.
+"tests/**/*.py" = ["S105", "S106", "S107", "ARG001", "ARG002"]
+# Package markers re-export names for convenience.
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ==============================================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# Lets async test functions run without an explicit marker on every test.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+]
+markers = [
+    "security: tests covering authentication, authorization, injection, XSS, CSRF and rate limiting",
+    "integration: tests that require a live Supabase or Redis instance",
+]

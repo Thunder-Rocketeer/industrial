@@ -1,0 +1,66 @@
+# ==============================================================================
+# Local development stack (spec section 38).
+#
+# Redis runs here by default; Supabase remains a hosted service and is reached
+# over the network, so it is not containerised.
+#
+#   docker compose up -d redis          # Redis only, the common case
+#   docker compose --profile full up    # Redis + backend + frontend
+# ==============================================================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: acf-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    profiles: ["full"]
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: acf-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # Secrets come from server/.env, which is git-ignored and never baked into
+    # the image (spec section 65).
+    env_file:
+      - ./server/.env
+    environment:
+      # Inside the compose network Redis resolves by service name.
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    profiles: ["full"]
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: acf-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+    depends_on:
+      - backend
+
+volumes:
+  redis-data:

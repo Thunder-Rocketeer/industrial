@@ -1,0 +1,23 @@
+# Normalize line endings so the repository is consistent across Windows, macOS
+# and Linux. Text files are stored as LF; Git checks them out with the platform
+# convention.
+* text=auto eol=lf
+
+# Shell scripts and files consumed inside Linux containers must keep LF even on
+# a Windows checkout.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.py        text eol=lf
+
+# Binary assets: never touch.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.pdf  binary
+
+# Collapse lockfile noise in diffs and reviews.
+package-lock.json -diff linguist-generated
