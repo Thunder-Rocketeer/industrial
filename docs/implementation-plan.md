@@ -88,31 +88,65 @@ remaining checks in one command once a database exists.
 
 ---
 
-## Phase 3 — Backend
+## Phase 3 — Backend ✅ complete
 
-- `app/db/`: a Supabase client alongside the existing psycopg connection, and a
-  pool opened in the application lifespan so each worker holds one.
-- `app/schemas/`: explicit request and response models for every endpoint. No
-  raw database structure is ever returned (spec section 10).
-- `app/repositories/`: all queries, parameterized. Sort and filter fields
-  resolved through an explicit allow-list map (spec section 57).
-- `app/services/`: KPI calculations per spec section 43 — production
-  achievement, defect rate, first-pass yield, availability, performance,
-  quality, OEE, inventory health.
-- `app/cache/`: Redis client, the key patterns from spec section 12, TTLs from
-  configuration, and centralized invalidation (spec section 13).
-- `app/security/`: Google OAuth 2.0 / OIDC via Authlib with PKCE, `state` and
-  `nonce` validation, strict issuer/audience/signature/expiry checks; JWT
-  issuing and verification with a fixed algorithm; RBAC policy in one module.
-- `app/api/routes/`: the endpoints from spec section 9.
-- Redis-backed rate limiting (spec section 60) and audit logging (section 67).
+Database integration, repositories, services, KPI calculations, Redis caching
+and the API.
 
-**Acceptance:** every endpoint has a response model; no query is built by string
-concatenation; unauthenticated requests get 401 and unauthorized ones get 403.
+**Delivered**
+
+- `app/db/pool.py` — async connection pool, one per worker, with a server-side
+  statement timeout and graceful startup when the database is unreachable.
+- `app/repositories/` — 6 repositories over a shared base that owns the
+  SQL-injection boundary: parameterised values, an allow-list for sort fields,
+  and `psycopg.sql` composition for the one identifier that must be interpolated.
+- `app/services/` — 8 services. `kpi.py` holds every formula from spec section 43
+  as pure functions; `labels.py` holds the display text that keeps state readable
+  without colour.
+- `app/schemas/` — explicit request and response models for every endpoint, with
+  bounded pagination, date ranges and enum filters.
+- `app/cache/` — client, keys, serializer and service. Read-through with
+  volatility tiers, a circuit breaker, and degradation to the database on any
+  failure.
+- `app/security/rate_limit.py` — Redis-backed fixed-window limiting with
+  unforgeable client identity and fail-open behaviour.
+- **37 endpoints** across 9 OpenAPI tags, including every endpoint in spec
+  section 9.
+- Security headers, structured error envelope with correlation IDs, and
+  liveness/readiness probes that do not conflate.
+- `docs/api.md` — full API reference.
+
+**Acceptance**
+
+| Check | Result |
+|---|---|
+| `ruff check .` | clean |
+| `ruff format --check .` | clean |
+| `pytest` | 337 passed, 25 skipped |
+| Security tests (injection, XSS, rate limiting, headers) | pass |
+| Cache tests (hit, miss, TTL, Redis unavailable) | pass |
+| KPI formula tests | 39 pass |
+| Application starts and serves `/api/v1/health` | verified |
+| All 37 endpoints reachable through the route layer | verified |
+| OpenAPI: every endpoint has summary, description, tag, response model | verified |
+
+**Two real bugs the tests caught**
+
+- Seven grouping endpoints returned 422 for every request: FastAPI does not
+  allow a `Query()`-bound Pydantic model alongside additional scalar `Query`
+  parameters. Fixed by moving `limit` onto the filter models.
+- `kpi.defect_rate` was uncapped while the response schema declared `le=100`, so
+  inconsistent data would have produced a 500 rather than a visible number.
+
+**Not executed here:** anything requiring a live database. The 25 integration
+tests, and `python -m app.db.verify`, run the moment `DATABASE_URL` is set.
+
+**Deliberately deferred to Phase 4:** Google OAuth, JWT issuing and validation,
+RBAC, CSRF, and Content-Security-Policy.
 
 ---
 
-## Phase 4 — Frontend foundation
+## Phase 4 — Authentication and frontend foundation
 
 - Authenticated application shell: sidebar, header, content region, toasts.
 - Login page and route protection. Note that Next.js 16 renames middleware to

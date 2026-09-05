@@ -52,6 +52,12 @@ class ErrorDetail(BaseModel):
     details: dict[str, list[str]] | None = Field(
         default=None, description="Field-level validation messages, when applicable."
     )
+    #: Also returned as the X-Request-ID header. Carried in the body as well so
+    #: a user can quote it from an error message without opening devtools, and
+    #: an operator can find the matching server log (spec section 17).
+    request_id: str | None = Field(
+        default=None, description="Correlation ID matching the server-side log entry."
+    )
 
 
 class ErrorResponse(BaseModel):

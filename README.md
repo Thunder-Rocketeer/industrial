@@ -8,13 +8,20 @@ Built to the specification in
 [`automobile_component_factory_claude_code_spec_v2.md`](./automobile_component_factory_claude_code_spec_v2.md),
 which is the authoritative document for this project.
 
-> **Status: Phases 1–2 complete.**
-> Repository structure and tooling are in place; the Supabase schema, security
-> policies and deterministic seed are written and statically verified.
-> Authentication, Redis caching, business logic and the dashboard UI are
-> implemented in Phases 3–10. See
-> [`docs/implementation-plan.md`](./docs/implementation-plan.md) and
-> [`docs/database.md`](./docs/database.md).
+> **Status: Phases 1–3 complete.**
+> Repository structure, the Supabase schema and deterministic seed, and the full
+> backend API — repositories, services, KPI calculations, Redis caching and 37
+> endpoints — are implemented and tested. Authentication and the dashboard UI
+> are Phases 4–10.
+>
+> The schema and seed have **not yet been executed against a live Supabase
+> project** (no database was reachable from the development machine). See
+> [Applying the schema](#supabase-setup).
+>
+> Reference: [`docs/api.md`](./docs/api.md) ·
+> [`docs/database.md`](./docs/database.md) ·
+> [`docs/architecture.md`](./docs/architecture.md) ·
+> [`docs/implementation-plan.md`](./docs/implementation-plan.md)
 
 ---
 
@@ -73,16 +80,16 @@ IR_Project/
 │   │   ├── main.py             application factory, middleware, error handlers
 │   │   ├── config.py           validated settings from the environment
 │   │   ├── dependencies.py     shared FastAPI dependencies
-│   │   ├── api/                router + route modules
-│   │   ├── schemas/            Pydantic request/response models
-│   │   ├── services/           business logic and KPI calculations
-│   │   ├── repositories/       database access
+│   │   ├── api/routes/         9 route modules, 37 endpoints
+│   │   ├── schemas/            Pydantic request/response models + filters
+│   │   ├── services/           business logic, KPI formulas, display labels
+│   │   ├── repositories/       database access, parameterised
 │   │   ├── models/             domain entities and enums
-│   │   ├── db/                 connections, reference data, generator,
-│   │   │                       seed and verify commands
-│   │   ├── cache/              Redis client, keys, invalidation
-│   │   ├── security/           OAuth/OIDC, JWT, RBAC
+│   │   ├── db/                 pool, connections, seed and verify commands
+│   │   ├── cache/              Redis client, keys, serializer, service
+│   │   ├── security/           rate limiting (OAuth/JWT in Phase 4)
 │   │   └── utils/              logging and cross-cutting helpers
+│   ├── tools/                  SQL validation, schema builder
 │   └── tests/
 │
 ├── supabase/
@@ -274,6 +281,8 @@ It is disabled automatically when `APP_ENV=production`.
 | `ruff check .` | Lint |
 | `ruff check --fix .` | Lint with autofix |
 | `ruff format .` | Format |
+| `pytest -m security` | Security tests only |
+| `pytest -m integration` | Live-database tests (needs `DATABASE_URL`) |
 | `python -m app.db.seed` | Seed the demo dataset |
 | `python -m app.db.verify` | Validate the seeded database |
 | `python tools/validate_sql.py` | Parse the migrations with the PostgreSQL grammar |
@@ -283,6 +292,43 @@ Development tooling lives in `requirements-dev.txt`:
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
+```
+
+---
+
+## API
+
+37 endpoints under `/api/v1`, documented interactively at
+<http://localhost:8000/docs> and in full in [`docs/api.md`](./docs/api.md).
+
+```
+/dashboard/summary        everything the dashboard needs, in one request
+/dashboard/trends         chart series
+/production               + /summary /trend /by-{machine,component,shift,line}
+/quality                  + /summary /defects /trend /by-{machine,component}
+/inventory                + /alerts /summary /{id} /{id}/transactions /{id}/trend
+/machines                 + /summary /{id}
+/analytics/oee            + /trend /by-machine
+/analytics/production-efficiency  + /trend
+/analytics/downtime  /analytics/defects
+/alerts                   + /active /summary
+/maintenance
+/health  /health/live  /health/ready
+```
+
+Responses use three envelopes and nothing else:
+
+```json
+{ "data": {} }
+{ "data": [], "pagination": { "page": 1, "page_size": 25, "total": 1250 } }
+{ "error": { "code": "...", "message": "...", "request_id": "..." } }
+```
+
+Every response carries `X-Request-ID`, which also appears in the server log for
+the same request. Quote it when reporting a problem.
+
+```bash
+curl -s http://localhost:8000/api/v1/dashboard/summary | jq '.data.kpis[] | {label, value, unit, status}'
 ```
 
 ---
@@ -297,9 +343,20 @@ cd server && pytest
 cd client && npm run lint && npm run typecheck && npm run build
 ```
 
-Backend tests use a `TestClient` against an application built with test
-settings, so no live Supabase or Redis instance is required. Tests that do need
-real services are marked `@pytest.mark.integration`.
+**337 tests, no external services required.** API tests override the service
+dependencies with fakes, the cache tests use an in-memory Redis stand-in that
+can be told to fail, and the SQL is validated by parsing it with the real
+PostgreSQL grammar (`pglast`).
+
+A further **25 integration tests** run against a live database and are skipped
+unless `DATABASE_URL` is set. They are the ones that prove a column exists, a
+join does not fan out, and an aggregate reconciles with its rows:
+
+```bash
+cd server
+# after applying the schema and seeding
+pytest -m integration
+```
 
 ## Production build
 

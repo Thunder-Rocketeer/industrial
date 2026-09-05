@@ -1,6 +1,6 @@
 # Architecture
 
-Decisions taken during Phases 1 and 2, and the reasoning behind them. This
+Decisions taken during Phases 1 to 3, and the reasoning behind them. This
 document records *why* the system looks the way it does; the README covers *how*
 to run it, and [`database.md`](./database.md) is the schema reference.
 
@@ -260,7 +260,135 @@ randomised on every API request. With generation living in a module that nothing
 in the request path imports, that is guaranteed structurally rather than by
 remembering.
 
-## 13. Typography
+## 13. The backend layers
+
+```
+Router      HTTP only: parse, validate, delegate, return
+   |
+Service     business rules, KPI derivation, cache orchestration
+   |
+Repository  database access, parameterised, nothing else
+   |
+PostgreSQL
+```
+
+Two rules keep it honest, and both are enforced by tests rather than by review.
+
+**No SQL above the repository.** A test parses every service and route module
+and fails on a SQL keyword. That is what makes the injection surface auditable:
+one directory to read.
+
+**No KPI formula outside `services/kpi.py`.** Every percentage the application
+reports comes from one of eleven pure functions. Duplicating `rejected /
+inspected` in a second place is how two endpoints end up disagreeing about the
+same day's defect rate while each looks plausible alone.
+
+The maintenance endpoint got its own service purely to preserve this. It needs
+no business logic, but letting a route call a repository directly would have put
+data access in a handler.
+
+## 14. Where an aggregate is computed
+
+In PostgreSQL, always. A 90-day production summary touches roughly 3,000 rows in
+the database and returns one; the alternative transfers 3,000 rows to compute a
+sum in Python (spec sections 11 and 23).
+
+Two cases are worth calling out because the reason is not obvious.
+
+**Ideal output for the Performance term** is summed in SQL, not derived from a
+total. Cycle time varies per component, so a machine that ran three parts has
+three different ideal rates — the denominator is only correct if it is summed
+per row.
+
+**Production and targets are aggregated separately, then joined on the date.**
+Joining first would multiply production rows by the number of target rows for
+that day. It is the classic fan-out, and it inflates a sum silently: the detail
+list still looks right. An integration test asserts the aggregate equals the sum
+of the detail rows, which is the assertion that catches it.
+
+## 15. Concurrency in the dashboard, and its cost
+
+The dashboard summary needs nine independent aggregates. They run under
+`asyncio.gather`, each on its own pooled connection, bounded by a semaphore
+sized from `DB_MAX_CONCURRENT_QUERIES`.
+
+The bound is the point. Spec section 19 asks for concurrency "without
+sacrificing database stability" — and without a limit, a handful of simultaneous
+page loads would each try to take nine connections and exhaust a pool sized for
+ten.
+
+The cost of this design is worth stating plainly: because each query takes its
+own connection, the nine aggregates read in nine separate transactions and
+therefore nine slightly different snapshots. For a dashboard that refreshes every
+thirty seconds this is immaterial. If exact cross-aggregate consistency were ever
+required, they would have to share one connection and run sequentially — trading
+latency for it.
+
+Every other endpoint takes exactly one connection for the whole request, so its
+repositories all read from the same snapshot.
+
+## 16. Degradation as a design property
+
+Three dependencies can fail, and each has a defined behaviour rather than an
+accidental one.
+
+**Redis unavailable** — every cache operation returns "miss" and the request
+reads the database. Requests are slower and entirely correct. A circuit breaker
+opens after repeated failures so an outage costs one timeout per cooldown window
+rather than one per request; without it, a cache outage becomes a latency
+outage.
+
+**Redis unavailable, for the rate limiter** — fails *open*. Requests are allowed
+and the outage is logged. Failing closed would convert a cache outage into a
+total outage, which is the worse failure.
+
+**Database unavailable** — liveness still answers `ok`, readiness reports
+`not_ready` with 503, and data endpoints return a clean `DATABASE_UNAVAILABLE`
+envelope. Liveness deliberately touches nothing: if it checked the database, a
+blip would have an orchestrator kill and restart every healthy instance.
+
+The pattern throughout is that a failure degrades the response, never the
+envelope. A client always gets a well-formed answer.
+
+## 17. What the API returns, and what it does not
+
+**Never a raw database row.** Every endpoint declares a response model and every
+mapping is written out field by field. `model_validate(row)` would be shorter and
+would silently publish the next column someone adds.
+
+**Never HTML.** The API returns structured data; a stored `<script>` tag comes
+back as a JSON string value, intact. Sanitising it here would be wrong — the
+value is data, the frontend escapes on render. What makes that safe is the
+content type plus `nosniff`, which stops a browser opening the response directly
+from reinterpreting it as a document.
+
+**Never an internal detail in an error.** A psycopg error message can contain the
+failing SQL, a column name or a connection string. The handler sends it to the
+log with `exc_info` and returns a code, a safe message and the request ID.
+
+**Always a label with a status.** Spec section 45 forbids conveying state by
+colour alone, so `status_label`, `severity_label` and the rest travel with their
+enum. Producing them server-side means two components cannot render the same
+status differently, and a new enum value fails a test instead of appearing raw
+on screen.
+
+## 18. Two constraints discovered while building
+
+Recorded because both cost time and neither is obvious from the documentation.
+
+**FastAPI allows one Pydantic model bound to the query string per route, and it
+cannot be combined with additional scalar `Query` parameters.** Doing so makes
+the model a required body-style field, and every request fails with
+`filters: Field required`. Seven grouping endpoints hit this; the fix was to move
+`limit` onto the filter model. An API test that walks every documented endpoint
+is what caught it.
+
+**Dependencies resolve before path-parameter validation.** A request to
+`/machines/<not-a-uuid>` against an unreachable database returns 503, not 422 —
+the connection dependency raises first. Worth knowing when reading a test
+failure, and harmless in production where the database is up.
+
+## 19. Typography
 
 `next/font/google` downloads font files at build time. That makes the build
 depend on reaching `fonts.gstatic.com`, which fails on offline and

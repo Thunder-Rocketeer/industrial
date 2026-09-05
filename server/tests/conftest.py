@@ -22,6 +22,13 @@ os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-used-in-any-real-deployment")
 os.environ.setdefault("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 
+# Tests must not touch external services. Without these the application
+# lifespan attempts a Redis connection on every TestClient context, which added
+# roughly two minutes to a full run purely in connection timeouts.
+os.environ.setdefault("CACHE_ENABLED", "false")
+os.environ.setdefault("DATABASE_URL", "")
+os.environ.setdefault("RATE_LIMIT_ENABLED", "true")
+
 from app.config import Settings, get_settings
 from app.main import create_app
 

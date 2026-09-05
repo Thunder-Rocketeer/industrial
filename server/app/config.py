@@ -72,12 +72,41 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     database_url: str = ""
 
+    # Connection pool. Each Gunicorn worker holds its own pool, so the total
+    # connection count against Supabase is workers x db_pool_max_size -- keep
+    # that product below the project's connection limit.
+    db_pool_min_size: int = Field(default=1, ge=0, le=50)
+    db_pool_max_size: int = Field(default=10, ge=1, le=100)
+    #: Seconds to wait for a free pooled connection before giving up.
+    db_pool_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    #: TCP connect timeout, so an unreachable database fails fast.
+    db_connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    #: Server-side statement timeout. A runaway aggregate is cancelled by
+    #: PostgreSQL rather than holding a connection open indefinitely.
+    db_statement_timeout_ms: int = Field(default=15_000, ge=100, le=300_000)
+    #: Bounds how many aggregate queries the dashboard runs concurrently. Each
+    #: takes its own pooled connection, so this must stay below the pool size.
+    db_max_concurrent_queries: int = Field(default=5, ge=1, le=32)
+
     # -- Redis (spec sections 12 and 60) --------------------------------------
     redis_url: str = "redis://localhost:6379/0"
+    #: Master switch. Disabling it makes every read go to the database, which is
+    #: the correct behaviour for a test run and a useful production kill switch.
+    cache_enabled: bool = True
+    cache_key_prefix: str = "acf"
     cache_ttl_dashboard: int = Field(default=30, ge=0)
     cache_ttl_trends: int = Field(default=300, ge=0)
     cache_ttl_analytics: int = Field(default=900, ge=0)
     cache_ttl_reference: int = Field(default=3600, ge=0)
+    #: Redis timeouts are deliberately short. The cache exists to make requests
+    #: faster; waiting on an unhealthy Redis would make them slower than not
+    #: caching at all.
+    redis_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
+    redis_command_timeout_seconds: float = Field(default=1.0, gt=0, le=30)
+    #: After repeated failures the cache stops being consulted for this long, so
+    #: an outage costs one timeout rather than one per request.
+    cache_circuit_breaker_seconds: float = Field(default=30.0, ge=0, le=600)
+    cache_circuit_breaker_failures: int = Field(default=3, ge=1, le=100)
 
     # -- Security / JWT (spec section 55) -------------------------------------
     secret_key: str = ""
@@ -104,6 +133,14 @@ class Settings(BaseSettings):
     rate_limit_authenticated: str = "120/minute"
     rate_limit_analytics: str = "30/minute"
     rate_limit_unauthenticated: str = "60/minute"
+    #: Liveness probes are polled frequently by orchestrators and must not be
+    #: throttled into reporting a false outage.
+    rate_limit_health: str = "600/minute"
+    #: Number of reverse proxies in front of the application. Only this many
+    #: entries are trusted from the right of X-Forwarded-For; at 0 the header is
+    #: ignored entirely. Spec section 60: never trust an arbitrary XFF, because
+    #: a client can otherwise forge one and reset its own rate-limit bucket.
+    trusted_proxy_count: int = Field(default=0, ge=0, le=10)
 
     # -- Seed data (spec section 30) ------------------------------------------
     seed_random_seed: int = 20240101
@@ -144,6 +181,21 @@ class Settings(BaseSettings):
         if lowered not in allowed:
             raise ValueError(f"COOKIE_SAMESITE must be one of {sorted(allowed)}")
         return lowered
+
+    @field_validator(
+        "rate_limit_oauth",
+        "rate_limit_authenticated",
+        "rate_limit_analytics",
+        "rate_limit_unauthenticated",
+        "rate_limit_health",
+    )
+    @classmethod
+    def _validate_rate_limit(cls, value: str) -> str:
+        """Reject a malformed policy at startup rather than at first request."""
+        from app.security.rate_limit import parse_rate_limit
+
+        parse_rate_limit(value)
+        return value
 
     @field_validator("log_level")
     @classmethod
