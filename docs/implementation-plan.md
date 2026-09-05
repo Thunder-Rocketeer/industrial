@@ -40,35 +40,58 @@ authentication, OAuth, Redis caching, business logic.
 
 ---
 
-## Phase 2 — Database
+## Phase 2 — Database ✅ complete
 
-Design the Supabase schema and produce deterministic seed data.
+Supabase schema, security policies and the deterministic seed.
 
-- Tables from spec section 6: `users`, `roles`, `factory_lines`, `machines`,
-  `components`, `production_records`, `quality_records`, `defects`,
-  `inventory_items`, `inventory_transactions`, `maintenance_records`,
-  `daily_targets`, `shifts`, `alerts`, `audit_logs`.
-- Primary keys (UUID), foreign keys, unique / NOT NULL / CHECK constraints,
-  created and updated timestamps, all stored in UTC.
-- Indexes on the columns listed in spec section 29 — driven by real query
-  patterns, not applied blindly to every column.
-- `python -m app.db.seed`: 4 factory lines, 12+ machines with mixed states, 10+
-  components, 30–90 days of production history across shifts, quality records
-  with a deliberately skewed defect distribution so the Pareto chart is
-  meaningful, inventory spanning healthy/low/critical/overstocked, and
-  completed plus upcoming maintenance.
-- Seeding is deterministic under `SEED_RANDOM_SEED`, idempotent, and safe on a
-  fresh database.
+**Delivered**
 
-**Acceptance:** the seed runs twice without duplicating rows; every foreign key
-resolves; a documented reset path exists.
+- 8 migrations in `supabase/migrations/`, plus a generated single-file
+  `supabase/schema.sql` for the Supabase SQL editor.
+- All 15 tables from spec section 6, with UUID primary keys, 25 foreign keys,
+  58 CHECK constraints, 20 unique constraints and `timestamptz` throughout.
+- 28 indexes chosen against real dashboard query patterns, 5 of them partial.
+- Deny-by-default RLS: enabled *and forced* on every table, privileges revoked
+  from `anon` and `authenticated`, default privileges altered so future tables
+  inherit the posture. `audit_logs` is append-only by trigger.
+- `python -m app.db.seed` — ~13,200 rows: 4 lines, 14 machines across all seven
+  types and all four states, 10 components, 3 shifts, 8 defect types, 90 days of
+  production and inspection history, inventory spanning all four stock states,
+  maintenance history and upcoming work, and 10 alerts derived from that state.
+- `python -m app.db.verify` — 11 acceptance checks against a live database.
+- `docs/database.md` — schema reference, security decisions, seed model.
+
+**Acceptance**
+
+| Check | Result |
+|---|---|
+| Migrations parse as PostgreSQL (`pglast`/libpg_query) | 142 statements, clean |
+| All 15 spec tables created | verified from the parse tree |
+| RLS enabled and forced on every table | 15/15, asserted by test |
+| No permissive policy exposes a browser role | asserted by test |
+| Helper functions pin `search_path` | 5/5, asserted from the parse tree |
+| Seed is deterministic across runs | asserted by test |
+| Seed is idempotent (upsert on derived UUIDs) | asserted by test |
+| Referential integrity of generated data | asserted by test |
+| Quantity arithmetic matches every CHECK constraint | asserted by test |
+| Defect distribution is Pareto-shaped | top three = 64% |
+| Inventory covers all four stock states | asserted by test |
+| `pytest` | 90 passed |
+| `ruff check` / `ruff format --check` | clean |
+
+**Not executed here:** applying the migrations and running the seed against a
+live Supabase project. The Supabase MCP endpoint is unreachable from this
+machine, and there is no Docker, local PostgreSQL or Supabase CLI available, so
+no real PostgreSQL instance existed to run against. Everything that can be
+verified without one has been, and `python -m app.db.verify` performs the
+remaining checks in one command once a database exists.
 
 ---
 
 ## Phase 3 — Backend
 
-- `app/db/`: Supabase client and PostgreSQL connection pool, opened in the
-  application lifespan so each worker holds one pool.
+- `app/db/`: a Supabase client alongside the existing psycopg connection, and a
+  pool opened in the application lifespan so each worker holds one.
 - `app/schemas/`: explicit request and response models for every endpoint. No
   raw database structure is ever returned (spec section 10).
 - `app/repositories/`: all queries, parameterized. Sort and filter fields

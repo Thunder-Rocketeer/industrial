@@ -8,11 +8,13 @@ Built to the specification in
 [`automobile_component_factory_claude_code_spec_v2.md`](./automobile_component_factory_claude_code_spec_v2.md),
 which is the authoritative document for this project.
 
-> **Status: Phase 1 complete — foundations only.**
-> Repository structure, tooling and the frontend/backend scaffolding are in
-> place and verified. The database schema, seed data, authentication, Redis
-> caching, business logic and dashboard UI are implemented in Phases 2–10. See
-> [`docs/implementation-plan.md`](./docs/implementation-plan.md).
+> **Status: Phases 1–2 complete.**
+> Repository structure and tooling are in place; the Supabase schema, security
+> policies and deterministic seed are written and statically verified.
+> Authentication, Redis caching, business logic and the dashboard UI are
+> implemented in Phases 3–10. See
+> [`docs/implementation-plan.md`](./docs/implementation-plan.md) and
+> [`docs/database.md`](./docs/database.md).
 
 ---
 
@@ -76,13 +78,18 @@ IR_Project/
 │   │   ├── services/           business logic and KPI calculations
 │   │   ├── repositories/       database access
 │   │   ├── models/             domain entities and enums
-│   │   ├── db/                 Supabase/PostgreSQL connections, seed command
+│   │   ├── db/                 connections, reference data, generator,
+│   │   │                       seed and verify commands
 │   │   ├── cache/              Redis client, keys, invalidation
 │   │   ├── security/           OAuth/OIDC, JWT, RBAC
 │   │   └── utils/              logging and cross-cutting helpers
 │   └── tests/
 │
-├── docs/                       architecture notes and the phase plan
+├── supabase/
+│   ├── migrations/             schema source of truth (8 migrations)
+│   └── schema.sql              generated single-file schema, for the SQL editor
+│
+├── docs/                       architecture, database reference, phase plan
 └── docker-compose.yml          Redis, plus optional full stack
 ```
 
@@ -155,16 +162,22 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 
 ## Supabase setup
 
-*Introduced in Phase 2. Currently a placeholder.*
-
 1. Create a project at [supabase.com](https://supabase.com).
 2. From **Project Settings → API**, copy the project URL, the anon key and the
    service-role key into `server/.env`.
-3. From **Project Settings → Database**, copy the connection string into
-   `DATABASE_URL`.
-4. Apply the schema migrations (Phase 2).
+3. From **Project Settings → Database → Connection string → URI**, copy the
+   connection string into `DATABASE_URL`.
+4. Apply the schema. Open the project's **SQL Editor**, paste the contents of
+   [`supabase/schema.sql`](./supabase/schema.sql) and run it. The whole schema
+   is wrapped in one transaction, so a failure leaves the database untouched.
 
-Supabase migrations remain the source of truth for the database schema.
+   With the Supabase CLI installed, `supabase db push` does the same thing from
+   `supabase/migrations/`.
+
+The migrations in `supabase/migrations/` are the source of truth;
+`supabase/schema.sql` is generated from them by `python tools/build_schema.py`.
+
+Full reference: [`docs/database.md`](./docs/database.md).
 
 ## Redis setup
 
@@ -177,16 +190,33 @@ Or install Redis natively and point `REDIS_URL` at it.
 
 ## Database seed
 
-*Introduced in Phase 2.*
-
 ```bash
 cd server
-python -m app.db.seed
+python -m app.db.seed      # write ~13,200 rows of demo factory data
+python -m app.db.verify    # 11 checks against the result
 ```
 
-The seed is deterministic: `SEED_RANDOM_SEED` fixes the pseudo-random stream, so
-the same seed always produces the same demo database. It is safe to re-run
-against a fresh development database and preserves referential integrity.
+The seed is deterministic and idempotent. `SEED_RANDOM_SEED` fixes the
+pseudo-random stream and every row's primary key is derived from its natural key
+by UUID v5, so re-running refreshes rows in place rather than duplicating them.
+The whole seed runs in one transaction.
+
+| Command | Purpose |
+|---|---|
+| `python -m app.db.seed` | Seed with the configured defaults (90 days) |
+| `python -m app.db.seed --dry-run` | Generate and report counts, write nothing |
+| `python -m app.db.seed --history-days 30` | Shorter history |
+| `python -m app.db.seed --seed 12345` | Different deterministic dataset |
+| `python -m app.db.seed --truncate` | Reset the seeded tables first (destructive; refused in production) |
+| `python -m app.db.verify` | Validate schema, indexes, RLS and KPI queries |
+
+What gets seeded: 4 production lines, 14 machines across all seven types and all
+four states, 10 components, 3 shifts, 8 defect types, 90 days of production and
+inspection history, 8 inventory items spanning all four stock states,
+maintenance history and upcoming work, and 10 alerts derived from that state.
+
+See [`docs/database.md`](./docs/database.md) for the realism model and the
+verification checklist.
 
 ---
 
@@ -244,6 +274,16 @@ It is disabled automatically when `APP_ENV=production`.
 | `ruff check .` | Lint |
 | `ruff check --fix .` | Lint with autofix |
 | `ruff format .` | Format |
+| `python -m app.db.seed` | Seed the demo dataset |
+| `python -m app.db.verify` | Validate the seeded database |
+| `python tools/validate_sql.py` | Parse the migrations with the PostgreSQL grammar |
+| `python tools/build_schema.py` | Regenerate `supabase/schema.sql` |
+
+Development tooling lives in `requirements-dev.txt`:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+```
 
 ---
 

@@ -1,0 +1,19 @@
+# ==============================================================================
+# Development-only dependencies.
+#
+# Kept separate from requirements.txt so the production image installs nothing
+# it does not need at runtime (spec section 69).
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+# ==============================================================================
+
+-r requirements.txt
+
+# PostgreSQL grammar, via libpg_query -- the parser PostgreSQL itself uses.
+#
+# Used by tools/validate_sql.py and tests/test_migrations.py to prove the
+# migrations and the verifier's embedded queries are valid PostgreSQL without
+# needing a live database. The migrations are applied to a hosted Supabase
+# project rather than from the test run, so without this a syntax error would
+# only be discovered by whoever applied the schema.
+pglast==8.4

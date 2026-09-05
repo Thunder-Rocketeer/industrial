@@ -40,9 +40,19 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests deliberately contain hard-coded credentials, tokens and injection
 # payloads as fixtures; bandit's secret and assert rules do not apply there.
-"tests/**/*.py" = ["S105", "S106", "S107", "ARG001", "ARG002"]
+"tests/**/*.py" = ["S105", "S106", "S107", "ARG001", "ARG002", "PLC0415", "S603"]
 # Package markers re-export names for convenience.
 "__init__.py" = ["F401"]
+# Command-line entry points: stdout is their user interface, so `print` is the
+# correct call, not a stray debugging statement.
+"app/db/seed.py" = ["T201"]
+"app/db/verify.py" = ["T201"]
+"tools/*.py" = ["T201"]
+# The generator draws from `random` to synthesise demo production figures.
+# Nothing here is a secret, a token or a key -- S311 is about cryptographic
+# suitability, which does not apply to simulated factory output. Determinism is
+# in fact the requirement (spec section 30), which rules out a CSPRNG.
+"app/db/generator.py" = ["S311"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

@@ -1,8 +1,8 @@
 # Architecture
 
-Decisions taken during Phase 1, and the reasoning behind them. This document
-records *why* the foundations look the way they do; the README covers *how* to
-run the project.
+Decisions taken during Phases 1 and 2, and the reasoning behind them. This
+document records *why* the system looks the way it does; the README covers *how*
+to run it, and [`database.md`](./database.md) is the schema reference.
 
 ---
 
@@ -63,8 +63,8 @@ Validation is deliberately strict at the edges where a mistake is dangerous:
   them is a property of the environment rather than something to remember.
 
 Supabase, Redis and OAuth values default to empty rather than being required, so
-the application can boot for health checks and tests before Phase 2 provisions
-those services. The layer that needs a value validates its presence at the point
+the application can boot for health checks and tests before those services are
+provisioned. The layer that needs a value validates its presence at the point
 of use — a missing key surfaces as a clear error from the component that needs
 it, not as an opaque startup failure.
 
@@ -166,7 +166,101 @@ Established in Phase 1 rather than retrofitted:
 Spec section 45 — never convey state by colour alone — is a design constraint
 that the Phase 4 status components implement.
 
-## 10. Typography
+## 10. Database
+
+The full reference is [`database.md`](./database.md). Three decisions are
+architectural rather than schema detail, and belong here.
+
+### 10.1 Denormalisation made safe by composite foreign keys
+
+`production_records.line_id` and `quality_records.machine_id/component_id` are
+derivable by a join, and stored anyway: the dashboard filters and groups by them
+on nearly every query, and spec section 29 asks for indexes on columns that must
+therefore exist.
+
+The usual cost of denormalisation is drift. It is avoided structurally. Each
+parent carries a redundant-looking `UNIQUE (id, <column>)` whose only purpose is
+to be the target of a composite foreign key from the child. PostgreSQL then
+rejects any child row whose copy disagrees with its parent. No trigger, no
+application-level check, and no way for the two to diverge.
+
+This is the pattern to reach for whenever a denormalised column is worth its
+keep: make the database prove the copy is correct rather than trusting the code
+that writes it.
+
+### 10.2 The quality grain
+
+One row per `(production_record, defect)`, with exactly one NULL-defect row per
+production record carrying the passes.
+
+The tempting alternative is one row per production record with a "primary
+defect" column. It is simpler and it is wrong: a run that produced three kinds
+of defect would record one and silently discard the rest, and the Pareto chart
+in spec section 5.3 would be built on incomplete data while looking perfectly
+plausible.
+
+With this grain, inspected quantities sum back to what was produced, defect rate
+is a plain ratio, and the Pareto chart is a `GROUP BY` with no post-processing.
+The cost is one extra concept — the two legal row shapes — which a CHECK
+constraint enforces so it cannot be got wrong.
+
+### 10.3 Deriving what can be derived
+
+`inventory_items.status` is a generated column, not a stored value. Stock health
+is a pure function of quantity against thresholds, so computing it in the
+database removes every path by which the number and its label could disagree,
+and removes the need for a job to keep it fresh.
+
+The line between this and spec section 42's "keep calculations in backend
+services" is worth stating: **invariants of a single row belong in the database;
+aggregates across rows belong in services.** A row describing 3 units of a
+material with a minimum of 50 must never be labelled healthy — that is an
+invariant. Today's OEE across fourteen machines is an aggregate, and stays in a
+service.
+
+## 11. Determinism in the seed
+
+Two separate mechanisms, doing two different jobs. Conflating them is the usual
+reason "deterministic" seeds turn out not to be.
+
+**Identifiers** are derived, not generated: `uuid5(namespace, natural_key)`. The
+same natural key yields the same UUID in any process on any machine. Three
+things follow. Re-seeding becomes a plain `ON CONFLICT (id) DO UPDATE` with no
+lookup table. A foreign key can be computed before the row it points at exists,
+so generation order is free — which is why the generator builds production
+records *before* machines and derives machine utilisation from them. And the
+dataset can be compared across runs, which is what makes the determinism tests
+possible without a database.
+
+**Values** come from `random.Random` seeded by a blake2b hash. Python's built-in
+`hash()` is salted per process for strings, so a seed built on it would produce
+different data every run while appearing deterministic within one.
+
+Each random stream is keyed to the coordinates of the thing being generated —
+date, shift, machine — rather than drawn from one shared sequence. Generation is
+therefore order-independent: adding a machine to the catalogue changes only that
+machine's rows and leaves the rest of the history byte-identical. A single
+shared stream would reshuffle ninety days of data every time the catalogue
+changed, which would make the seed reproducible but not stable, and would break
+every test that asserts on a specific window.
+
+## 12. Generation separated from persistence
+
+`generator.py` contains no database code. `seed.py` contains no generation
+logic.
+
+That split is what allows the dataset's properties — determinism, referential
+integrity, quantity arithmetic, the defect distribution, the inventory ledger
+reconciling to stated stock — to be tested without a database at all. It also
+makes a failure unambiguous: either the data is wrong or the write is, never
+both at once.
+
+It has a third effect worth naming. Spec section 31 requires that values are not
+randomised on every API request. With generation living in a module that nothing
+in the request path imports, that is guaranteed structurally rather than by
+remembering.
+
+## 13. Typography
 
 `next/font/google` downloads font files at build time. That makes the build
 depend on reaching `fonts.gstatic.com`, which fails on offline and
