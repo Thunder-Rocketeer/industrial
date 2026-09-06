@@ -58,13 +58,15 @@ const API_ORIGIN = apiOriginForCsp(process.env.NEXT_PUBLIC_API_BASE_URL);
  * carried no CSP would be a hole in the policy on exactly the paths an
  * unauthenticated visitor touches first.
  */
-function withSecurityHeaders(response: NextResponse, nonce: string): NextResponse {
+function withSecurityHeaders(response: NextResponse, csp: string): NextResponse {
   for (const [header, value] of Object.entries(BASE_SECURITY_HEADERS)) {
     response.headers.set(header, value);
   }
+  // The same policy string that was given to Next.js on the request, so the
+  // nonce the browser enforces is always the nonce the scripts carry.
   response.headers.set(
     CSP_ENFORCED ? "Content-Security-Policy" : "Content-Security-Policy-Report-Only",
-    buildCsp(nonce, API_ORIGIN),
+    csp,
   );
   return response;
 }
@@ -72,23 +74,40 @@ function withSecurityHeaders(response: NextResponse, nonce: string): NextRespons
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  // Next.js reads the nonce back out of the request headers and stamps it onto
-  // the inline scripts it emits, so it has to be set on the *request* as well
-  // as used in the response policy.
+  /*
+   * Next.js takes the nonce from a `Content-Security-Policy` header on the
+   * *request*, and from nowhere else.
+   *
+   * An earlier version set only `x-nonce`, which Next.js does not read. In
+   * development that went unnoticed -- the dev server emits its scripts
+   * differently -- but a production build then rendered twelve `<script>` tags
+   * with no nonce at all, every one of which the policy would block. Enforcing
+   * the CSP would have served a blank page.
+   *
+   * Found by running the production build in Chromium and listening for
+   * `securitypolicyviolation`: 53 violations, all `script-src-elem`. Report-only
+   * mode is the only reason it was survivable.
+   *
+   * `x-nonce` is still set, for any component that wants to nonce an inline
+   * style or script of its own.
+   */
   const nonce = createNonce();
+  const csp = buildCsp(nonce, API_ORIGIN);
+
   const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("content-security-policy", csp);
   requestHeaders.set("x-nonce", nonce);
   const forward = { request: { headers: requestHeaders } };
 
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
-    return withSecurityHeaders(NextResponse.next(forward), nonce);
+    return withSecurityHeaders(NextResponse.next(forward), csp);
   }
 
   // Presence only. The cookie is HttpOnly and signed by the API, so its
   // contents are neither readable nor verifiable here.
   const hasSession = request.cookies.has(SESSION_COOKIE);
   if (hasSession) {
-    return withSecurityHeaders(NextResponse.next(forward), nonce);
+    return withSecurityHeaders(NextResponse.next(forward), csp);
   }
 
   const loginUrl = new URL("/login", request.url);
@@ -98,7 +117,7 @@ export function proxy(request: NextRequest) {
   if (pathname !== "/") {
     loginUrl.searchParams.set("next", `${pathname}${search}`);
   }
-  return withSecurityHeaders(NextResponse.redirect(loginUrl), nonce);
+  return withSecurityHeaders(NextResponse.redirect(loginUrl), csp);
 }
 
 export const config = {

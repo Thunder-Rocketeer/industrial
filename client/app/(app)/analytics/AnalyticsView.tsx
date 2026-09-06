@@ -162,7 +162,7 @@ export function AnalyticsView() {
       </section>
 
       {/* OEE breakdown + trend */}
-      <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="mb-4 grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
         <Section title="OEE breakdown" description="Which factor is holding OEE back">
           <QueryBoundary
             query={oee}
@@ -208,7 +208,7 @@ export function AnalyticsView() {
       </div>
 
       {/* Efficiency */}
-      <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="mb-4 grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
         <Section title="Production efficiency" description="Output against plan and target">
           <QueryBoundary
             query={efficiency}

@@ -81,6 +81,50 @@ def _request_context(request: Request) -> dict[str, str | None]:
     }
 
 
+def resolve_rate_limit_subject(request: Request, settings: Settings) -> str | None:
+    """The user id behind a request, for rate-limit bucketing only.
+
+    THIS GRANTS NO AUTHORITY. It answers one question -- "which bucket should
+    this request be counted against?" -- and every caller must treat a result of
+    `None` as "use the IP address", never as "reject". Authentication remains
+    `get_current_user`'s job, and it still runs the full flow afterwards:
+    revocation, user lookup, active check, permission.
+
+    WHY THIS EXISTS
+
+    `client_identifier` prefers `request.state.user_id`, and `_policy_for`
+    chooses the authenticated policy from the same attribute. Both were correct
+    in intent and neither ever fired: `user_id` is set by `get_token_claims`,
+    which is a route *dependency*, and dependencies run after all HTTP
+    middleware. The rate limiter therefore ran before the attribute existed and
+    silently took both fallbacks on every authenticated request.
+
+    Two consequences, both observed in Phase 8 against the running application:
+
+      * Every signed-in user was bucketed by IP, so colleagues sharing a factory
+        NAT throttled each other. Two different signed-in users on one address:
+        the first exhausted the window, the second was refused on its next
+        request with no traffic of its own.
+      * Signed-in users were held to the *unauthenticated* policy -- 60 requests
+        a minute rather than 120. The reproduction cut off at exactly 60, which
+        is what identified the cause.
+
+    Decoding here is not a second authorization path. It verifies the signature
+    and the expiry because that is the cheapest way to learn the subject at all,
+    and any failure -- absent, malformed, expired, misconfigured -- simply means
+    no subject and an IP bucket.
+    """
+    token = read_session_token(request.cookies, settings)
+    if token is None:
+        return None
+    try:
+        return str(decode_access_token(token, settings).subject)
+    except (TokenError, TokenConfigurationError):
+        # `TokenExpiredError` is a `TokenError`. An unusable token is not an
+        # error here; it just means this request has no user bucket.
+        return None
+
+
 async def get_token_claims(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -122,8 +166,10 @@ async def get_token_claims(
             detail="Authentication is not correctly configured on the server.",
         ) from exc
 
-    # Store for the rate limiter, which prefers a user bucket over an IP one so
-    # colleagues behind one NAT are not throttled by each other.
+    # Normally already set by the rate-limit middleware, which resolves the
+    # same subject before the route is reached (see
+    # `resolve_rate_limit_subject`). Kept so the attribute is still correct
+    # for a caller that reaches this dependency by another path.
     request.state.user_id = str(claims.subject)
     return claims
 

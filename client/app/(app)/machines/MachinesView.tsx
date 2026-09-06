@@ -243,7 +243,10 @@ function MachineTable({
   );
 
   return (
-    <div className="w-full overflow-x-auto">
+    // `[contain:paint]` for the same reason as `DataTable`: without it a wide
+    // table leaks its intrinsic width into the root scrolling box and the whole
+    // page scrolls sideways on a phone.
+    <div className="w-full overflow-x-auto [contain:paint]">
       <table className="w-full border-collapse text-sm">
         <caption className="sr-only">
           Machines in the fleet, with status, utilization and downtime

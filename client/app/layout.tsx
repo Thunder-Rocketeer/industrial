@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 
 import { AppProviders } from "@/providers/app-providers";
 import { env } from "@/lib/env";
@@ -23,7 +24,39 @@ export const viewport: Viewport = {
   maximumScale: 5,
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+/**
+ * `connection()` opts the whole application into dynamic rendering, and it is
+ * the CSP nonce that requires it.
+ *
+ * Next.js stamps the per-request nonce onto its scripts during *server-side
+ * rendering*, reading it from the `Content-Security-Policy` header on the
+ * incoming request (see `proxy.ts`). A statically prerendered page is built
+ * before any request exists, so there is no header to read and no nonce to
+ * stamp -- the HTML ships with bare `<script>` tags that the policy then
+ * blocks. Awaiting a connection here tells Next.js to wait for a real request
+ * before rendering, which is what makes the header available.
+ *
+ * Phase 7 measured this against a dev server and read it as working. Phase 8
+ * ran the production build in Chromium and found 53 `script-src-elem`
+ * violations: twelve script tags, zero nonces. Enforcing the policy would have
+ * served a blank page.
+ *
+ * It sits in the root layout because the root layout is part of every route, so
+ * one call covers `/login`, `/` and the whole authenticated tree.
+ *
+ * The cost is small here and would not be elsewhere. Every page in this
+ * application is behind authentication and loads its data client-side through
+ * TanStack Query, so the prerendered HTML was only ever an empty shell -- and
+ * `proxy.ts` already runs on each of these requests, so no CDN was caching them
+ * either. What is given up is the static shell, not any real caching.
+ *
+ * Next.js 16 note: `export const dynamic = "force-dynamic"` is no longer the
+ * documented route to this, and is removed outright under Cache Components.
+ * `connection()` is the supported API.
+ */
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  await connection();
+
   return (
     <html lang="en" className="h-full antialiased">
       <body className="flex min-h-full flex-col">

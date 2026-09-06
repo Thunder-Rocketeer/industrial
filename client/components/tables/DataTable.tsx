@@ -20,6 +20,17 @@
  *
  * Horizontal overflow is contained: the wrapper scrolls, the page does not
  * (spec section 37).
+ *
+ * `[contain:paint]` on that wrapper is load-bearing rather than decoration. A
+ * wide table inside `overflow-x-auto` scrolls correctly inside its own box, but
+ * in Chromium its intrinsic width still reaches the *root* scrolling box, so
+ * the whole page scrolls sideways. Measured on /production at 375px: the
+ * wrapper clipped at 349px while the document reported 902px and the page could
+ * be dragged 527px right. `overflow-x: hidden` on an ancestor does not help --
+ * it is not an ancestor-overflow problem -- and `table-layout: fixed` does but
+ * destroys the column sizing a data table depends on. `contain: paint` confines
+ * painting to the box, which removes the root-scroller contribution and leaves
+ * layout, column widths and internal scrolling untouched.
  */
 import { flexRender } from "@tanstack/react-table";
 import type { RowData } from "@tanstack/react-table";
@@ -52,7 +63,7 @@ export function DataTable<TRow extends RowData>({
   const rows = table.getRowModel().rows;
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="w-full overflow-x-auto [contain:paint]">
       <table className="w-full border-collapse text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead>

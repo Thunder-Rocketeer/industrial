@@ -136,7 +136,11 @@ export function LineTrendChart({
   return (
     <ChartFrame data={data} height={height}>
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
+        <LineChart
+          data={rows}
+          accessibilityLayer={false}
+          margin={{ top: 4, right: 8, bottom: 0, left: -12 }}
+        >
           <CartesianGrid {...GRID_PROPS} />
           <XAxis dataKey="label" tickFormatter={shortDate} minTickGap={24} {...AXIS_PROPS} />
           <YAxis
@@ -194,7 +198,11 @@ export function ParetoChart({ data, height = 280 }: { data: ChartData; height?: 
   return (
     <ChartFrame data={data} height={height} emptyTitle="No defects recorded in this period">
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
+        <ComposedChart
+          data={rows}
+          accessibilityLayer={false}
+          margin={{ top: 4, right: 8, bottom: 0, left: -12 }}
+        >
           <CartesianGrid {...GRID_PROPS} />
           <XAxis
             dataKey="label"
@@ -275,6 +283,7 @@ export function GroupedBarChart({
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart
           data={rows}
+          accessibilityLayer={false}
           layout={horizontal ? "vertical" : "horizontal"}
           margin={{ top: 4, right: 12, bottom: 0, left: horizontal ? 8 : -12 }}
         >
@@ -288,7 +297,16 @@ export function GroupedBarChart({
                   unitLabel === "%" ? `${value}%` : formatNumber(value)
                 }
               />
-              <YAxis type="category" dataKey="label" width={92} {...AXIS_PROPS} />
+              {/*
+                `interval={0}` forces a label on every bar.
+
+                Recharts thins category labels automatically when it thinks they
+                will collide, and on a fourteen-machine fleet it dropped every
+                other one — leaving half the bars anonymous. A bar chart whose
+                bars cannot be identified conveys nothing, so the labels are
+                mandatory and the axis is given the width to hold them.
+              */}
+              <YAxis type="category" dataKey="label" width={92} interval={0} {...AXIS_PROPS} />
             </>
           ) : (
             <>

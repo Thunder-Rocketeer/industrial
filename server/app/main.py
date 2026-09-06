@@ -38,6 +38,7 @@ from app.repositories.base import UnknownSortFieldError
 from app.runtime import configure_event_loop_policy
 from app.schemas.common import ErrorDetail, ErrorResponse
 from app.security.csrf import CsrfError, validate as validate_csrf
+from app.security.dependencies import resolve_rate_limit_subject
 from app.security.oauth import build_oauth_registry, is_configured
 from app.security.rate_limit import RateLimiter, client_identifier, parse_rate_limit
 from app.security.revocation import TokenRevocationStore
@@ -173,33 +174,53 @@ def _error_response(
     )
 
 
-def _policy_for(request: Request, settings: Settings) -> str:
-    """Choose the rate-limit policy for a request.
+def _policy_for(request: Request, settings: Settings) -> tuple[str, str]:
+    """Choose the rate-limit bucket and policy for a request.
 
     Path-based rather than per-route so a new endpoint inherits a sensible limit
     instead of being unlimited until someone remembers to annotate it.
+
+    THE BUCKET AND THE POLICY ARE CHOSEN TOGETHER, DELIBERATELY
+
+    They used to be chosen apart: the policy here, from the whole path, and the
+    bucket at the call site, from the third path segment. For most endpoints
+    those agreed. For `/auth` they did not -- `/auth/status` and
+    `/auth/google/login` both landed in a bucket named "auth" while being held
+    to 120 and 10 requests a minute respectively. One counter, two limits, and
+    the lax traffic spent the strict allowance: twelve `/auth/status` calls,
+    which the login page makes simply by being opened, were enough to have the
+    next sign-in attempt refused with a 429. Reloading the login page a dozen
+    times locked you out of it for the rest of the minute.
+
+    Returning both from one function is what stops that recurring. A new
+    classification cannot be added here without also giving it a bucket.
     """
     path = request.url.path
 
     if "/health" in path:
         # Orchestrators poll liveness frequently; throttling it would produce a
         # false outage.
-        return settings.rate_limit_health
+        return "health", settings.rate_limit_health
     if "/auth/google" in path:
         # The OAuth endpoints, strictest of all: they are unauthenticated, they
         # reach an external provider, and they are the natural target for
-        # someone hammering sign-in.
-        return settings.rate_limit_oauth
+        # someone hammering sign-in. Their own bucket, so nothing else can
+        # consume the allowance that protects sign-in.
+        return "oauth", settings.rate_limit_oauth
     if "/auth" in path:
-        # /auth/me, /auth/logout, /auth/csrf. Called routinely by a signed-in
-        # frontend, so moderate rather than strict.
-        return settings.rate_limit_authenticated
+        # /auth/me, /auth/logout, /auth/csrf, /auth/status. Called routinely by
+        # the frontend, so moderate rather than strict.
+        return "auth", settings.rate_limit_authenticated
     if "/analytics" in path:
-        return settings.rate_limit_analytics
-    # Phase 4 populates `user_id`; until then every request is unauthenticated.
+        return "analytics", settings.rate_limit_analytics
+
+    # Everything else is a data endpoint, and keeps a bucket per resource
+    # ("production", "quality", ...) so a heavy page does not spend the
+    # allowance of an unrelated one.
+    scope = path.split("/")[3] if path.count("/") >= 3 else "root"
     if getattr(request.state, "user_id", None):
-        return settings.rate_limit_authenticated
-    return settings.rate_limit_unauthenticated
+        return scope, settings.rate_limit_authenticated
+    return scope, settings.rate_limit_unauthenticated
 
 
 def register_middleware(app: FastAPI, settings: Settings) -> None:
@@ -317,9 +338,19 @@ def register_middleware(app: FastAPI, settings: Settings) -> None:
             return await call_next(request)
 
         limiter: RateLimiter = request.app.state.rate_limiter
-        policy = parse_rate_limit(_policy_for(request, settings))
+
+        # Resolve the user *before* choosing a policy or a bucket. Both
+        # `_policy_for` and `client_identifier` read `request.state.user_id`,
+        # which until now was only ever set by a route dependency -- i.e. after
+        # this middleware had already run and taken its fallbacks. See
+        # `resolve_rate_limit_subject`; it confers no authority.
+        subject = resolve_rate_limit_subject(request, settings)
+        if subject:
+            request.state.user_id = subject
+
+        scope, policy_source = _policy_for(request, settings)
+        policy = parse_rate_limit(policy_source)
         identifier = client_identifier(request, settings.trusted_proxy_count)
-        scope = request.url.path.split("/")[3] if request.url.path.count("/") >= 3 else "root"
 
         result = await limiter.check(identifier=identifier, scope=scope, policy=policy)
 

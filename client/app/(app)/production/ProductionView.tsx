@@ -224,7 +224,7 @@ export function ProductionView() {
       </section>
 
       {/* Trend + comparison */}
-      <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="mb-4 grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
         <Section
           title="Production trend"
           description="Produced, target and plan over the selected range"

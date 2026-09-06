@@ -47,7 +47,17 @@
 
   --foreground: #18181b;
   --muted: #52525b;
-  --subtle: #71717a;
+  /*
+   * 4.84:1 on the page background, 5.28:1 on a card.
+   *
+   * This was #71717a, which measures 4.83:1 on white and passes -- but the page
+   * background is #f4f5f7, not white, and against that it is 4.43:1: below the
+   * 4.5 AA threshold, and used for exactly the text most likely to be skimmed
+   * (page descriptions, breadcrumbs, table meta). axe-core found it in Chromium
+   * on all eight pages; no static check had, because the ratio depends on which
+   * surface the text lands on.
+   */
+  --subtle: #6b6b74;
 
   --border: #d9dce1;
   --border-strong: #b9bec7;
@@ -199,9 +209,28 @@ body {
   }
 }
 
-/* Recharts sizes itself from its container; without this the SVG can force a
-   parent wider than the viewport and reintroduce horizontal page scroll. */
-.recharts-wrapper,
-.recharts-surface {
-  max-width: 100%;
-}
+/*
+ * DO NOT add `max-width: 100%` to `.recharts-wrapper` or `.recharts-surface`.
+ *
+ * Phase 6 did, as belt-and-braces against horizontal overflow, and it silently
+ * blanked every chart in the application. Recharts 3 renders
+ *
+ *   .recharts-responsive-container  (correctly measured, e.g. 729px)
+ *     └── div                       (0 x 0 until Recharts sizes it)
+ *           └── .recharts-wrapper   (the element Recharts actually sizes)
+ *
+ * A `max-width: 100%` on the wrapper resolves against that 0-width middle div,
+ * so the wrapper is clamped to zero -- and because Recharts sets an explicit
+ * width on the wrapper rather than on the middle div, it can never grow back.
+ * The result is a chart with a correct legend, a correct accessible summary and
+ * an entirely blank plot area.
+ *
+ * It survived Phase 6 and Phase 7 because jsdom has no layout engine: every
+ * structural test passed against an element that measured zero in a real
+ * browser. Phase 8 found it in Chromium within minutes.
+ *
+ * Overflow is already handled where it belongs -- `ChartFrame` renders the
+ * container inside a `w-full` box, every card and grid child carries `min-w-0`,
+ * and wide tables scroll in their own `overflow-x-auto` wrapper. Verified at
+ * 375, 390, 768, 1024, 1280 and 1440px in `e2e/responsive.spec.ts`.
+ */

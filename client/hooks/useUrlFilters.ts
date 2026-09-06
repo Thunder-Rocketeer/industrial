@@ -18,8 +18,9 @@
  *  - **Nothing sensitive goes in the URL** (spec section 28). These are ids and
  *    dates that the API authorizes independently on every request; URLs end up
  *    in history, referrers and screenshots, so nothing else belongs here.
- *  - **`replace`, not `push`, by default.** Adjusting a date range should not
- *    stack twenty history entries the Back button has to walk out of.
+ *  - **`push`, so Back undoes a filter.** Reaching a filtered view and pressing
+ *    Back should clear the filter, not leave the page. Verified in a real
+ *    browser by `e2e/pages.spec.ts`.
  */
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
@@ -71,7 +72,22 @@ export function useUrlFilters<TKey extends string>(
       const params = new URLSearchParams(search);
       mutate(params);
       const query = params.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      /*
+       * `push`, so Back steps through filter changes.
+       *
+       * Phase 6 used `replace`, reasoning that adjusting a date range should
+       * not stack history entries. In a browser that turned out to be the
+       * wrong trade: choosing a machine and then pressing Back left the page
+       * entirely instead of clearing the filter, which is not what Back means
+       * to anyone. Spec section 28 asks for refresh, back/forward and sharing
+       * to all work over filter state, and only `push` delivers the middle one.
+       *
+       * The entry-stacking worry does not apply to what these controls
+       * actually are: selects commit once per choice, and date inputs fire on
+       * a completed date. The one control that could stack entries -- free
+       * text -- debounces before it ever reaches this function.
+       */
+      router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
     },
     [router, pathname, search],
   );

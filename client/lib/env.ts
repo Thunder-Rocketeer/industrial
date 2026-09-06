@@ -15,6 +15,33 @@
  */
 import { z } from "zod";
 
+/**
+ * Turn off Zod's JIT validator compiler, because the CSP forbids `eval`.
+ *
+ * Zod 4 compiles a schema into a specialised validator with `new Function(...)`
+ * the first time it parses. Under `script-src` without `'unsafe-eval'` that call
+ * is blocked. Zod does guard it -- it probes with `Function("")` and falls back
+ * to an interpreted path if the probe throws -- but the probe *is* the forbidden
+ * operation, so it still trips the policy: Chromium reported two
+ * `script-src blocked eval` violations on every page that parses a schema
+ * (/dashboard, /production, /analytics), traced to columns 7626 and 39841 of the
+ * shared chunk, which are Zod's probe and its `compile()`.
+ *
+ * `jitless` is Zod's documented setting for environments that disallow `eval`.
+ * Setting it means the compiler is never reached and nothing has to be caught.
+ * Validation behaviour is identical; only the interpretation strategy changes,
+ * and this module parses five values once at load, so the JIT was never earning
+ * anything here.
+ *
+ * The alternative -- adding `'unsafe-eval'` to the policy -- would have relaxed
+ * the CSP to accommodate a probe whose failure is already handled. The fix
+ * belongs on this side of the boundary.
+ *
+ * This is the only module in the client bundle that imports Zod, and it is
+ * imported by the root layout, so configuring it here covers the application.
+ */
+z.config({ jitless: true });
+
 const clientEnvSchema = z.object({
   NEXT_PUBLIC_API_BASE_URL: z
     .url({ message: "NEXT_PUBLIC_API_BASE_URL must be a valid absolute URL" })

@@ -154,7 +154,14 @@ export function DashboardView() {
           `xl:grid-cols-3` with the chart spanning two: the trend needs the
           width to be readable, the alert list does not.
           --------------------------------------------------------------- */}
-      <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
+      {/*
+        `items-start` so each card keeps its natural height.
+
+        Without it the grid stretches every child to the tallest, and the alerts
+        column — six alerts of prose — left roughly 800px of empty card beneath
+        a 260px chart. Ragged bottoms read better than a void that large.
+      */}
+      <div className="mb-4 grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
         <Section
           title="Production trend"
           description="Produced against target and plan, last 30 days"

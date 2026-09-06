@@ -104,11 +104,24 @@ export function Stat({
   hint?: ReactNode;
   className?: string;
 }) {
+  /*
+   * The hint lives inside the `<dd>`, not beside it.
+   *
+   * A `<dl>` may only contain `<dt>`/`<dd>` groups, and a wrapping `<div>` may
+   * only contain those. A `<p>` sitting alongside them breaks the association
+   * between the term and its description -- axe-core flags it as
+   * `definition-list`, and a screen reader reading the list loses the hint. It
+   * is a description of the value, so it belongs in the description.
+   */
   return (
     <div className={cn("min-w-0", className)}>
       <dt className="text-subtle truncate text-xs">{label}</dt>
-      <dd className="text-foreground mt-0.5 text-lg font-semibold tracking-tight">{value}</dd>
-      {hint && <p className="text-subtle mt-0.5 text-xs">{hint}</p>}
+      <dd className="mt-0.5">
+        <span className="text-foreground block text-lg font-semibold tracking-tight">
+          {value}
+        </span>
+        {hint && <span className="text-subtle mt-0.5 block text-xs">{hint}</span>}
+      </dd>
     </div>
   );
 }

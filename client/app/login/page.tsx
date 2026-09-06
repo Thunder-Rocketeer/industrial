@@ -50,13 +50,54 @@ const FAILURE_MESSAGES: Record<string, string> = {
 /**
  * Accept a redirect target only if it is a same-site path.
  *
- * A value starting with `//` is protocol-relative and navigates off-site, so a
- * leading slash alone is not sufficient.
+ * This is defence in depth, not the control. The API validates `next` again
+ * against its own rule and discards anything that is not a plain in-application
+ * path (`server/app/security/redirects.py`), and that check is the one that
+ * decides. This one exists so a hostile value is dropped before it is ever put
+ * in a link a user might see or copy.
+ *
+ * Being second does not license being weaker, and it was. The earlier version
+ * rejected `//evil.example` and passed `/\evil.example` straight through:
+ * browsers normalise a backslash to a forward slash, so that is the same
+ * protocol-relative URL wearing a different hat. Only the backend stopped it.
+ * Phase 8 found the gap by sending both forms at the real login page and
+ * watching what came out in the sign-in link.
+ *
+ * The rule now mirrors the backend's: a leading slash, no second slash or
+ * backslash behind it, nothing that could be a scheme or a control character,
+ * and the same must hold after one round of percent-decoding -- which is what
+ * catches `/%2f%2fevil.example`, a value that is a path right up until the
+ * browser decodes it.
  */
 function safeNextPath(value: string | null): string | undefined {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+  if (!value) {
     return undefined;
   }
+
+  // A browser decodes once, not repeatedly, so one pass matches what it will
+  // actually navigate to. A malformed escape makes `decodeURIComponent` throw;
+  // that is not a path either.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+
+  for (const form of [value, decoded]) {
+    if (!form.startsWith("/")) {
+      return undefined;
+    }
+    // `//host` and `/\host` both read as scheme-relative URLs.
+    if (form.startsWith("//") || form.startsWith("/\\")) {
+      return undefined;
+    }
+    // A backslash or a control character anywhere is not part of a route.
+    if (form.includes("\\") || /[\u0000-\u001f\u007f]/.test(form)) {
+      return undefined;
+    }
+  }
+
   return value;
 }
 
