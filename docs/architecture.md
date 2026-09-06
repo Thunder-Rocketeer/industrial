@@ -599,3 +599,65 @@ development — Iconify quietly fetches it — so the regression is invisible
 exactly where it would be caught. `tests/icons.test.tsx` therefore renders every
 bundled icon with `fetch` instrumented and asserts zero calls, and separately
 asserts that every icon name in the source resolves locally.
+
+## 28. What running it together revealed
+
+Phases 2–6 tested the parts. Phase 7 connected them to a real Supabase instance,
+a real Redis and a real browserless HTTP client, and found seven defects that
+466 unit tests could not. They share a shape worth naming, because it predicts
+where the next one will be.
+
+**A test that never runs proves nothing.** The 25 integration tests had skipped
+since Phase 2 for want of a database. When one appeared they errored at setup on
+a `ScopeMismatch` that had been there all along — and once fixed, they
+immediately caught a real reconciliation bug. A skipped test is not a passing
+test; it is an unopened envelope.
+
+**Validating a statement is not the same as executing it.** Phase 2 parsed all
+155 SQL statements with the real PostgreSQL grammar and they were all valid.
+Migration 001 still failed on first contact, because a `language sql` function
+body is checked against the catalogue at creation time and the table it selected
+from did not exist yet. Grammar is not semantics.
+
+**The layer beneath can quietly undo the layer above.** `client_identifier`
+implements a careful trusted-proxy rule and it was correct. Uvicorn rewrote
+`request.client` from `X-Forwarded-For` before the application saw it, so the
+rule never applied and rate limiting could be bypassed by rotating a header.
+Neither component was wrong on its own; the composition was. This is the failure
+mode that unit tests are structurally blind to, because each side passes its own
+tests.
+
+**Two ways of saying "when" is one too many.** Quality windowed on
+`inspected_at`, production on `record_date`. Both defensible, both indexed, both
+tested — and together they made the dashboard print 398,369 inspected against
+395,315 produced for the same thirty days, with a defect rate that disagreed
+with the one in the next panel. The project had been careful about computing a
+metric once; it had not been careful about *dating* it once.
+
+**Degradation has to be tried, not designed.** The circuit breaker worked
+exactly as intended once Redis was actually stopped. But `create_redis` returned
+`None` when the startup ping failed, which disabled the cache for the life of
+the worker — a boot-order race in an orchestrator would have quietly sent every
+request to PostgreSQL until someone redeployed. The recovery path had never been
+walked.
+
+## 29. Dating a measurement
+
+`quality_records` rows carry `inspected_at`, a timestamp of when an inspection
+physically happened. `production_records` rows carry `record_date`, the business
+date of a shift. For a night shift these differ: the run belongs to Tuesday and
+its inspections are stamped early Wednesday.
+
+Filtering quality by `inspected_at` therefore answers "what did we inspect
+between these dates", which is a reasonable question and the wrong one here. The
+dashboard shows quality beside production, and the defect rate's denominator has
+to be the production the card above it reports.
+
+So every quality aggregate now joins its parent production record and windows on
+`pr.record_date`. The grain the schema is built on — (date, shift, machine,
+component) — is the authority on when something happened, and a child row
+inherits its parent's business date rather than asserting its own.
+
+The join costs nothing measurable: it is on a primary key covered by
+`quality_records_production_record_idx`, and the Pareto query already did it.
+

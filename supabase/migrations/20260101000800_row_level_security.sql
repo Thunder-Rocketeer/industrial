@@ -25,11 +25,78 @@
 -- Authorization for those requests is decided in the backend RBAC policy
 -- module (spec section 56), not here.
 --
--- IF DIRECT BROWSER ACCESS IS EVER INTRODUCED: the helper functions from
--- migration 001 and the worked policy template at the foot of this file are the
+-- IF DIRECT BROWSER ACCESS IS EVER INTRODUCED: the helper functions below and
+-- the worked policy template at the foot of this file are the
 -- starting point. Adding a policy alone is not enough -- the corresponding
 -- GRANT must be restored too.
 -- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- Authorization helpers.
+--
+-- Defined here rather than in migration 001 because they are SQL-language
+-- functions selecting from public.users, and PostgreSQL validates a SQL
+-- function body when the function is created. They cannot exist before
+-- migration 003 creates the table.
+--
+-- The current architecture routes every read through FastAPI using the
+-- service-role key, so these are not yet load-bearing. They exist so that the
+-- RLS policies sketched in migration 008 can be enabled without redesigning
+-- anything if direct Supabase access is ever introduced (spec section 66).
+--
+-- `auth.uid()` is Supabase's own function returning the authenticated user's
+-- UUID from the request JWT; it returns NULL for anonymous requests.
+-- -----------------------------------------------------------------------------
+create or replace function app.current_user_id()
+returns uuid
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select id
+  from public.users
+  where auth_user_id = auth.uid()
+    and is_active
+  limit 1;
+$$;
+
+comment on function app.current_user_id() is
+  'Maps the Supabase auth subject to a row in public.users. NULL when anonymous.';
+
+
+create or replace function app.current_user_role()
+returns text
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select r.code
+  from public.users u
+  join public.roles r on r.id = u.role_id
+  where u.auth_user_id = auth.uid()
+    and u.is_active
+  limit 1;
+$$;
+
+comment on function app.current_user_role() is
+  'Returns the role code of the calling user, or NULL when anonymous.';
+
+
+create or replace function app.has_role(required_roles text[])
+returns boolean
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select coalesce(app.current_user_role() = any(required_roles), false);
+$$;
+
+comment on function app.has_role(text[]) is
+  'True when the calling user holds one of the supplied role codes.';
+
 
 -- -----------------------------------------------------------------------------
 -- Layer 1 and 2 — enable and force RLS on every table.

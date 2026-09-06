@@ -8,7 +8,9 @@ nothing while appearing to.
 The frontend now exists. This document records **what it actually loads**, the
 policy that follows from that, and the one place the policy cannot be tight.
 
-Nothing here is deployed yet. It is a recommendation with the evidence attached.
+Sections 1–6 were written in Phase 6, before the policy was applied. Phase 7
+applied it and measured the result; §7 records what was actually observed and
+supersedes anything above it that reads as a proposal.
 
 ---
 
@@ -230,3 +232,70 @@ Before enabling enforcement:
       §3).
 - [ ] Re-run `npm test`; `tests/icons.test.tsx` and `tests/security.test.ts`
       cover the assumptions this policy rests on.
+
+---
+
+## 7. Phase 7: applied and measured
+
+The policy in §2 is no longer a recommendation. It is implemented in
+`client/lib/security-headers.ts` and attached by `client/proxy.ts` to every
+response, including redirects.
+
+### Emitted, verified
+
+```
+content-security-policy-report-only: default-src 'self'; style-src-elem 'self';
+  style-src-attr 'unsafe-inline'; img-src 'self' data: https://*.googleusercontent.com;
+  font-src 'self'; connect-src 'self' http://localhost:8000; form-action 'self';
+  frame-ancestors 'none'; base-uri 'none'; object-src 'none';
+  script-src 'self' 'nonce-<per request>' 'strict-dynamic'
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=()
+referrer-policy: strict-origin-when-cross-origin
+x-content-type-options: nosniff
+x-frame-options: DENY
+```
+
+`connect-src` is derived from `NEXT_PUBLIC_API_BASE_URL`, so the policy cannot
+drift from the address the application actually calls.
+
+### The nonce works
+
+This is the part most likely to break under a strict CSP, so it was measured
+rather than assumed:
+
+- **23 of 23** `<script>` tags on the served page carry the header's nonce.
+- **3 of 3** inline scripts — the RSC flight payload — carry it.
+
+Next.js reads the nonce from the CSP header it receives and stamps it onto the
+scripts it emits; the proxy sets it on the request headers as well as in the
+policy, which is what makes that work.
+
+### Nothing would be blocked
+
+Against the built page:
+
+| Check | Result |
+| --- | --- |
+| External resource references | **none** — everything same-origin |
+| `<style>` elements | 0 |
+| Inline `style=` in served HTML | 0 |
+| `javascript:` URLs | 0 |
+| `eval(` in production chunks | 0 |
+
+`style-src-attr 'unsafe-inline'` remains necessary, and §4's reasoning is
+unchanged: chart geometry is expressed through inline style attributes, and CSP
+provides no nonce mechanism for attributes. It stays scoped to the narrower of
+the two style directives.
+
+### Still report-only
+
+`NEXT_PUBLIC_CSP_REPORT_ONLY` defaults to true. Enforcement was **not**
+validated in a browser — no browser was available — so nothing has yet observed
+the policy failing to block something legitimate. Add a `report-uri`, watch for
+a week, then set it to `false`.
+
+### HSTS
+
+Still absent from the application, deliberately, and unchanged from Phase 4.
+Verified absent from live responses over `http://localhost`.
+

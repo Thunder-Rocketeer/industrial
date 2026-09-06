@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+import {
+  BASE_SECURITY_HEADERS,
+  apiOriginForCsp,
+  buildCsp,
+  createNonce,
+} from "@/lib/security-headers";
+
 /**
  * Route protection at the edge (spec section 25).
  *
@@ -34,18 +41,54 @@ const SESSION_COOKIE = "acf_session";
 /** Routes reachable without a session. */
 const PUBLIC_PATHS = ["/login"];
 
+/**
+ * Enforce the CSP, or only report violations.
+ *
+ * Report-only by default: a policy should be watched for a week before it is
+ * allowed to break anything.
+ */
+const CSP_ENFORCED = process.env.NEXT_PUBLIC_CSP_REPORT_ONLY === "false";
+
+const API_ORIGIN = apiOriginForCsp(process.env.NEXT_PUBLIC_API_BASE_URL);
+
+/**
+ * Attach the security headers to whatever response the proxy returns.
+ *
+ * Applied to redirects as well as to pass-through responses. A redirect that
+ * carried no CSP would be a hole in the policy on exactly the paths an
+ * unauthenticated visitor touches first.
+ */
+function withSecurityHeaders(response: NextResponse, nonce: string): NextResponse {
+  for (const [header, value] of Object.entries(BASE_SECURITY_HEADERS)) {
+    response.headers.set(header, value);
+  }
+  response.headers.set(
+    CSP_ENFORCED ? "Content-Security-Policy" : "Content-Security-Policy-Report-Only",
+    buildCsp(nonce, API_ORIGIN),
+  );
+  return response;
+}
+
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
+  // Next.js reads the nonce back out of the request headers and stamps it onto
+  // the inline scripts it emits, so it has to be set on the *request* as well
+  // as used in the response policy.
+  const nonce = createNonce();
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  const forward = { request: { headers: requestHeaders } };
+
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next(forward), nonce);
   }
 
   // Presence only. The cookie is HttpOnly and signed by the API, so its
   // contents are neither readable nor verifiable here.
   const hasSession = request.cookies.has(SESSION_COOKIE);
   if (hasSession) {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next(forward), nonce);
   }
 
   const loginUrl = new URL("/login", request.url);
@@ -55,7 +98,7 @@ export function proxy(request: NextRequest) {
   if (pathname !== "/") {
     loginUrl.searchParams.set("next", `${pathname}${search}`);
   }
-  return NextResponse.redirect(loginUrl);
+  return withSecurityHeaders(NextResponse.redirect(loginUrl), nonce);
 }
 
 export const config = {

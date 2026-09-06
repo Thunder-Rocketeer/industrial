@@ -35,6 +35,7 @@ QUALITY_SORTS = SortSpec(
 
 _LIST_FROM = sql.SQL("""
     public.quality_records q
+    join public.production_records pr on pr.id = q.production_record_id
     join public.machines   m on m.id = q.machine_id
     join public.components c on c.id = q.component_id
     left join public.defects d on d.id = q.defect_id
@@ -56,14 +57,31 @@ class QualityRepository(BaseRepository):
     ) -> WhereBuilder:
         """Build the shared WHERE clause.
 
-        `inspected_at` is a timestamptz and the filter is a date, so the upper
-        bound is expressed as `< end + 1 day` rather than `<= end`. Casting the
-        column to a date instead would work but would prevent the index on
-        `inspected_at` from being used.
+        The date filter is on the parent production record's `record_date`, not
+        on `inspected_at`, and that distinction is load-bearing.
+
+        A production run belongs to a business date -- the (date, shift,
+        machine, component) grain the schema is built on. Its inspections are
+        timestamped when they physically happened, which for a night shift is
+        often after midnight. Windowing quality by `inspected_at` therefore
+        selects a slightly different set of runs than the identical window over
+        production, and the two do not reconcile: measured against the live
+        seed, 398,369 units inspected against 395,315 produced over the same
+        thirty days.
+
+        That is not a rounding difference, it is two different questions. And
+        because the dashboard prints a production defect rate beside a quality
+        defect rate, the answer has to be the same one -- otherwise two panels
+        on one screen disagree and neither is wrong. Joining to the production
+        record makes the totals identical by construction.
+
+        The join is on a primary key covered by
+        `quality_records_production_record_idx`, so it is cheap; the Pareto
+        query already did exactly this.
         """
         where = WhereBuilder()
         where.add(
-            "q.inspected_at >= %s::date and q.inspected_at < (%s::date + interval '1 day')",
+            "pr.record_date >= %s and pr.record_date <= %s",
             start_date,
             end_date,
         )
@@ -150,6 +168,7 @@ class QualityRepository(BaseRepository):
                 count(distinct q.defect_id)             as distinct_defect_types,
                 count(*)                                as record_count
             from public.quality_records q
+            join public.production_records pr on pr.id = q.production_record_id
             {where}
         """).format(where=where.clause())
 
@@ -187,6 +206,7 @@ class QualityRepository(BaseRepository):
                 coalesce(sum(q.rejected_quantity), 0) as rejected_quantity,
                 count(*)                              as occurrence_count
             from public.quality_records q
+            join public.production_records pr on pr.id = q.production_record_id
             join public.defects d on d.id = q.defect_id
             {where}
             group by d.id, d.code, d.name, d.category, d.default_severity
@@ -221,10 +241,11 @@ class QualityRepository(BaseRepository):
 
         statement = sql.SQL("""
             select
-                (q.inspected_at at time zone 'UTC')::date as bucket_date,
+                pr.record_date as bucket_date,
                 coalesce(sum(q.inspected_quantity), 0)    as inspected_quantity,
                 coalesce(sum(q.rejected_quantity), 0)     as rejected_quantity
             from public.quality_records q
+            join public.production_records pr on pr.id = q.production_record_id
             {where}
             group by bucket_date
             order by bucket_date
@@ -264,6 +285,7 @@ class QualityRepository(BaseRepository):
                 coalesce(sum(q.inspected_quantity), 0) as inspected_quantity,
                 coalesce(sum(q.rejected_quantity), 0)  as rejected_quantity
             from public.quality_records q
+            join public.production_records pr on pr.id = q.production_record_id
             join {dimension_table} d on d.id = q.{fk_column}
             {where}
             group by d.id, d.code, d.name
@@ -290,7 +312,7 @@ class QualityRepository(BaseRepository):
                 count(distinct q.defect_id)             as distinct_defect_types,
                 count(*)                                as record_count
             from public.quality_records q
-            where q.inspected_at >= %s::date
-              and q.inspected_at < (%s::date + interval '1 day')
+            join public.production_records pr on pr.id = q.production_record_id
+            where pr.record_date = %s
         """)
-        return await self.fetch_one(statement, [on_date, on_date]) or {}
+        return await self.fetch_one(statement, [on_date]) or {}

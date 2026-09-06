@@ -287,7 +287,43 @@ documented and ready, but rolled out report-only first by design.
 
 ---
 
-## Phase 7 — Accessibility and responsive polish
+## Phase 7 — End-to-end integration and production hardening ✅ complete
+
+The first phase in which every layer ran together. Reference:
+[`e2e-verification.md`](./e2e-verification.md) and
+[`production-readiness.md`](./production-readiness.md).
+
+**Live database.** All nine migrations applied to a real Supabase project
+(PostgreSQL 17.6, ap-south-1), seeded twice with identical results, and verified
+11/11. RLS enabled and forced on all 15 tables with no policies and no
+privileges for browser roles; the append-only audit trigger rejects UPDATE.
+
+**Integration tests run for the first time.** All 25 pass. They had skipped
+since Phase 2 for want of a database, and a broken module-scoped fixture had
+been hiding behind those skips.
+
+**Live API verification.** `tools/e2e_probe.py` — 211 checks, 0 failures: the
+API contract against the frontend's TypeScript types (77), RBAC across 6 roles
+and 8 domains (56), session and token handling (10), Redis caching (11), rate
+limiting (6), injection/CSRF/redirect (38) and pagination (14).
+
+**Seven defects found and fixed**, none of which 466 unit tests could see:
+migration ordering, an unusable `DATABASE_URL` (unencoded password and an
+IPv6-only host), psycopg refusing Windows' default event loop, rate limiting
+bypassable through `X-Forwarded-For`, quality and production not reconciling,
+integration tests that could never run, and a cache permanently disabled by a
+momentary Redis outage.
+
+**CSP applied.** Emitted from `proxy.ts` in report-only mode with a per-request
+nonce, verified stamped onto all 23 script tags. Every resource is same-origin.
+
+**Deliberately not done:** Google sign-in end to end, and any browser-based
+verification — no browser was available. `e2e-verification.md` §13 lists all
+eight outstanding items.
+
+---
+
+## Phase 8 — Accessibility and responsive polish
 
 Keyboard navigation, screen-reader semantics, heading hierarchy, contrast,
 focus states, touch targets, reduced motion, and text alternatives for every
@@ -295,7 +331,7 @@ chart. Target WCAG 2.2 AA.
 
 ---
 
-## Phase 8 — Performance
+## Phase 9 — Performance
 
 Review API call patterns, TanStack Query cache configuration, Redis hit rates,
 database query plans and indexes, bundle size, chart rendering and table
@@ -303,7 +339,7 @@ rendering. Measure before optimizing.
 
 ---
 
-## Phase 9 — Testing
+## Phase 10 — Testing
 
 Backend: authentication, validation, production/quality/inventory calculations,
 OEE, API responses, cache behaviour — plus the security tests required by spec
@@ -315,7 +351,7 @@ navigation, authenticated route behaviour.
 
 ---
 
-## Phase 10 — Final documentation
+## Phase 11 — Final documentation
 
 Architecture, setup, seed process, demo credentials, API reference, deployment
 and known assumptions.

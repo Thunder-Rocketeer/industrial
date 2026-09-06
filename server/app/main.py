@@ -35,12 +35,18 @@ from app.config import Settings, get_settings
 from app.db.connection import DatabaseNotConfiguredError
 from app.db.pool import DatabasePool
 from app.repositories.base import UnknownSortFieldError
+from app.runtime import configure_event_loop_policy
 from app.schemas.common import ErrorDetail, ErrorResponse
 from app.security.csrf import CsrfError, validate as validate_csrf
 from app.security.oauth import build_oauth_registry, is_configured
 from app.security.rate_limit import RateLimiter, client_identifier, parse_rate_limit
 from app.security.revocation import TokenRevocationStore
 from app.utils.logging import configure_logging, get_logger
+
+# Must run before any event loop is created. Uvicorn imports this module
+# first and builds its loop afterwards, so module scope is early enough.
+# Without it, psycopg's async pool cannot connect on Windows at all.
+configure_event_loop_policy()
 
 logger = get_logger(__name__)
 

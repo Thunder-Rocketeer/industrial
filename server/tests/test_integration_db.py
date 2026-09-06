@@ -25,6 +25,7 @@ import os
 from datetime import date, timedelta
 
 import pytest
+import pytest_asyncio
 
 from app.config import Settings
 from app.db.pool import DatabasePool
@@ -38,6 +39,10 @@ from app.repositories.quality import QualityRepository
 
 pytestmark = [
     pytest.mark.integration,
+    # Every async test in this module runs on the module-scoped loop that the
+    # `pool` fixture lives on. Without this they each get a fresh loop and the
+    # module-scoped pool is a ScopeMismatch.
+    pytest.mark.asyncio(loop_scope="module"),
     pytest.mark.skipif(
         not os.environ.get("DATABASE_URL", "").strip(),
         reason="DATABASE_URL is not set; see this module's docstring to run these.",
@@ -48,9 +53,21 @@ pytestmark = [
 INJECTION_PAYLOADS = ["' OR '1'='1", "'; DROP TABLE production_records; --"]
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def pool():
-    """Open a pool against the configured database for the module."""
+    """Open a pool against the configured database for the module.
+
+    `loop_scope="module"` is not optional. pytest-asyncio runs each test on a
+    function-scoped event loop by default, and a module-scoped async fixture
+    asking for that loop is a `ScopeMismatch` -- every test in the module errors
+    at setup. The pool has to be module-scoped (opening one per test would mean
+    a fresh connection to Supabase for each) so the loop must be widened to
+    match it rather than the other way round.
+
+    This surfaced the first time the module actually ran, in Phase 7. Until a
+    real `DATABASE_URL` was reachable every test here skipped, and a skipped
+    test cannot report a broken fixture.
+    """
     settings = Settings()
     database_pool = DatabasePool(settings)
     await database_pool.open()
@@ -58,13 +75,13 @@ async def pool():
     await database_pool.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="module")
 async def connection(pool):
     async with pool.connection() as conn:
         yield conn
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="module")
 async def window(connection) -> tuple[date, date]:
     """A date range that actually contains data.
 

@@ -8,7 +8,7 @@ Built to the specification in
 [`automobile_component_factory_claude_code_spec_v2.md`](./automobile_component_factory_claude_code_spec_v2.md),
 which is the authoritative document for this project.
 
-> **Status: Phases 1–6 complete.**
+> **Status: Phases 1–7 complete.**
 > Repository structure, the Supabase schema and deterministic seed, the backend
 > API (repositories, services, KPI calculations, Redis caching, 44 endpoints),
 > authentication — Google OAuth 2.0 / OIDC, JWT sessions, RBAC — the frontend
@@ -16,9 +16,17 @@ which is the authoritative document for this project.
 > application shell, charts with text alternatives, server-driven tables and
 > URL-synchronized filters.
 >
-> The schema and seed have **not yet been executed against a live Supabase
-> project** (no database was reachable from the development machine). See
-> [Applying the schema](#supabase-setup).
+> The schema and seed **have now been applied to a live Supabase project**
+> (PostgreSQL 17.6) and verified end to end: 11/11 database checks, 25/25
+> integration tests, and 211/211 live API checks covering the contract, RBAC,
+> caching, rate limiting, injection, CSRF and open redirect. Seven integration
+> defects were found and fixed — see
+> [`docs/production-readiness.md`](./docs/production-readiness.md).
+>
+> Google sign-in was **not** completed end to end and no page has been rendered
+> in a browser; no browser was available. See
+> [`docs/e2e-verification.md`](./docs/e2e-verification.md) §13 for everything
+> outstanding.
 >
 > Reference: [`docs/api.md`](./docs/api.md) ·
 > [`docs/authentication.md`](./docs/authentication.md) ·
@@ -26,6 +34,8 @@ which is the authoritative document for this project.
 > [`docs/frontend-data-layer.md`](./docs/frontend-data-layer.md) ·
 > [`docs/dashboard-ui.md`](./docs/dashboard-ui.md) ·
 > [`docs/security-headers.md`](./docs/security-headers.md) ·
+> [`docs/e2e-verification.md`](./docs/e2e-verification.md) ·
+> [`docs/production-readiness.md`](./docs/production-readiness.md) ·
 > [`docs/architecture.md`](./docs/architecture.md) ·
 > [`docs/implementation-plan.md`](./docs/implementation-plan.md)
 
@@ -313,7 +323,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 cp .env.example .env
-uvicorn app.main:app --reload     # http://localhost:8000
+python -m app                     # http://localhost:8000
 ```
 
 Interactive API documentation is at <http://localhost:8000/docs> in development.
@@ -323,7 +333,9 @@ It is disabled automatically when `APP_ENV=production`.
 
 | Command | Purpose |
 |---|---|
-| `uvicorn app.main:app --reload` | Development server with auto-reload |
+| `python -m app` | Development server. Use this rather than calling uvicorn directly — see below |
+| `python -m app --reload` | Same, reloading on source changes |
+| `python -m tools.e2e_probe all` | Live end-to-end probe against a running API |
 | `pytest` | Run the test suite |
 | `pytest -m security` | Run only the security tests |
 | `ruff check .` | Lint |
@@ -425,7 +437,7 @@ pytest -m integration
 cd client && npm run build && npm start
 
 # backend
-cd server && gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w $WORKERS
+cd server && gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w $WORKERS \n  --forwarded-allow-ips=""
 ```
 
 Two notes on the production backend command:
@@ -433,6 +445,18 @@ Two notes on the production backend command:
 - **Gunicorn does not run on Windows.** It depends on the POSIX `fcntl` module.
   On a Windows development machine, exercise the production process manager
   through the container instead: `docker compose --profile full up backend`.
+- **`--forwarded-allow-ips=""` is not optional.** Uvicorn trusts
+  `X-Forwarded-For` by default and rewrites `request.client` from it, which
+  silently overrides the application's own `TRUSTED_PROXY_COUNT` rule. Phase 7
+  measured the consequence: a client rotating that header gets a fresh
+  rate-limit bucket per request, removing the limit entirely. Let the
+  application decide, and set `TRUSTED_PROXY_COUNT` to the number of proxies
+  actually in front. See `docs/production-readiness.md`.
+- **Why `python -m app` rather than `uvicorn` in development.** On Windows,
+  uvicorn selects `ProactorEventLoop`, which psycopg's async mode cannot use —
+  the pool never connects and every database endpoint fails. `python -m app`
+  passes a compatible loop factory and disables proxy headers. On Linux the
+  loop default is already fine.
 - `uvicorn.workers.UvicornWorker` emits a `DeprecationWarning`. It still works
   and is the form given in the specification. The successor is the separate
   `uvicorn-worker` package, which can be adopted at deployment time.

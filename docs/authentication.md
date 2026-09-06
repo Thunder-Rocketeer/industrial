@@ -681,3 +681,63 @@ can sign in as these accounts as seeded.** To demonstrate roles, either:
 | `401 account_unavailable` | The user is `is_active = false`. |
 | `403` on a page the user can see in the nav | Working as intended — frontend hiding is UX; the backend is authoritative. |
 | Every auth endpoint returns `503 DATABASE_UNAVAILABLE` | `DATABASE_URL` is not configured. Authentication needs the database for user lookup and audit. |
+
+---
+
+## Phase 7 verification status
+
+What was confirmed against a running system on 2026-09-06, and what was not.
+
+### Verified live
+
+The authorization redirect, against real Google infrastructure:
+
+```
+GET /api/v1/auth/google/login  ->  302 accounts.google.com/o/oauth2/v2/auth
+  response_type=code · scope=openid email profile
+  state=<30 chars> · nonce=<20 chars>
+  code_challenge=<43 chars> · code_challenge_method=S256
+Set-Cookie: acf_oauth  Path=/api/v1/auth  Max-Age=600  HttpOnly  SameSite=lax
+```
+
+Everything downstream of the session cookie, using sessions minted with the
+application's own `issue_access_token` and presented in the real cookie:
+
+| Check | Result |
+| --- | --- |
+| Valid session resolves `/auth/me` with role and permissions | pass |
+| No token echoed back to the client | pass |
+| Anonymous request | 401 |
+| Malformed token | 401 |
+| Token signed with a foreign key | 401 |
+| `alg: none` token | 401 |
+| Expired token | 401 |
+| Forged `role: ADMIN` claim on a VIEWER token | **ignored** — API reports VIEWER |
+| Logout revokes server-side | `session_revoked: true` |
+| The same token after logout | 401 — `jti` denylist in Redis, TTL 899s |
+| RBAC, 6 roles × 8 domains | 56/56 correct |
+| CSRF: missing / wrong / foreign-Origin token | 403, 403, 403 |
+| CSRF: correct token and Origin | 200 |
+| Open redirect, six hostile `next` forms | all contained, no CRLF in `Location` |
+
+Cookie attributes, read from `Set-Cookie`:
+
+| Cookie | Attributes |
+| --- | --- |
+| `acf_session` | HttpOnly, Path=/, SameSite=lax, 15-minute token |
+| `acf_csrf` | **not** HttpOnly (double-submit needs it readable), Path=/, SameSite=lax, Max-Age=900 |
+| `acf_oauth` | HttpOnly, Path=/api/v1/auth, Max-Age=600, SameSite=lax |
+
+`Secure` is absent because verification ran over `http://localhost`. Production
+configuration validation refuses to start with `COOKIE_SECURE=false` — tested.
+
+### Not verified
+
+The Google handshake itself. No browser was available, so nothing exercised:
+authenticating as a real user, the authorization code, the token exchange,
+ID-token signature and claim validation, `email_verified` enforcement, domain
+restriction, user provisioning on first login, or role assignment.
+
+That is the one part of this document still resting on code review rather than
+observation.
+

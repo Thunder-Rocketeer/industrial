@@ -240,8 +240,14 @@ class CacheClient:
 async def create_redis(settings: object) -> Redis | None:
     """Build a Redis client from settings, or `None` if caching is off.
 
-    Connection failures are not raised: the application must start whether or
-    not Redis is reachable, and the client degrades from there.
+    `None` means caching is *switched off* -- either `CACHE_ENABLED=false` or no
+    `REDIS_URL`. It does not mean Redis is unreachable: a client that cannot
+    connect yet is still returned, so the worker can recover without a restart.
+    The two states are distinct in the readiness endpoint too, which reports
+    "Disabled" for the first and "Unreachable" for the second.
+
+    Connection failures are never raised: the application must start whether or
+    not Redis is reachable, and degrade from there.
     """
     if not getattr(settings, "cache_enabled", True):
         logger.info("cache.disabled", extra={"reason": "cache_enabled=false"})
@@ -254,22 +260,61 @@ async def create_redis(settings: object) -> Redis | None:
 
     try:
         from redis.asyncio import Redis
+        from redis.asyncio.retry import Retry
+        from redis.backoff import ExponentialBackoff
+        from redis.exceptions import (
+            ConnectionError as RedisConnectionError,
+            TimeoutError as RedisTimeoutError,
+        )
 
         client = Redis.from_url(
             url,
             socket_connect_timeout=settings.redis_connect_timeout_seconds,
             socket_timeout=settings.redis_command_timeout_seconds,
-            retry_on_timeout=False,
-            health_check_interval=30,
+            # Re-establish a dropped connection instead of surfacing it as a
+            # cache failure.
+            #
+            # A pooled connection that has gone idle is closed by all sorts of
+            # things in front of Redis -- a failover, a load balancer's idle
+            # timeout, a NAT table entry expiring. Without a retry the next
+            # command raises, the circuit breaker counts it, and after a few
+            # such drops the cache is taken out of service for a minute even
+            # though Redis was healthy the whole time.
+            #
+            # Two attempts with a short backoff: enough to reconnect
+            # transparently, bounded tightly enough that a genuinely dead Redis
+            # still fails fast and lets the request fall through to PostgreSQL.
+            retry=Retry(ExponentialBackoff(base=0.05, cap=0.4), retries=2),
+            retry_on_error=[RedisConnectionError, RedisTimeoutError],
+            # Validate a connection that has been idle this long before reusing
+            # it. Shorter than the 30s default because an idle drop is the
+            # common case here, and a PING is far cheaper than a failed command.
+            health_check_interval=15,
         )
         await client.ping()
     except Exception as exc:
         # Never log the URL: it can carry a password.
+        #
+        # The client is returned anyway, deliberately. Redis being unreachable
+        # in the second the process boots is a normal event, not a permanent
+        # fact: an orchestrator commonly starts the app before Redis finishes
+        # accepting connections, and a rolling Redis upgrade produces the same
+        # window. Returning None here would answer that momentary condition by
+        # disabling the cache for the entire life of the worker -- every
+        # request afterwards going to PostgreSQL, and only a redeploy fixing
+        # it.
+        #
+        # Instead the circuit breaker owns the decision from here. It keeps the
+        # cache out of the path while Redis is failing and lets a probe through
+        # periodically, so the worker recovers on its own once Redis returns.
         logger.warning(
             "cache.unavailable_at_startup",
-            extra={"error_type": type(exc).__name__},
+            extra={
+                "error_type": type(exc).__name__,
+                "action": "will_retry_on_demand",
+            },
         )
-        return None
+        return client
 
     logger.info("cache.connected")
     return client
