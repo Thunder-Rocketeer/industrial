@@ -20,14 +20,14 @@ const MAX_QUERY_RETRIES = 2;
  * 429 is not retried automatically either, since doing so would work against
  * the backend rate limiter (spec section 60).
  */
-function shouldRetry(failureCount: number, error: unknown): boolean {
+export function shouldRetry(failureCount: number, error: unknown): boolean {
   if (failureCount >= MAX_QUERY_RETRIES) return false;
   if (error instanceof ApiError) return error.isRetryable;
   return false;
 }
 
 /** Exponential backoff, capped so the UI never appears to hang. */
-function retryDelay(attemptIndex: number): number {
+export function retryDelay(attemptIndex: number): number {
   return Math.min(1000 * 2 ** attemptIndex, 10_000);
 }
 

@@ -191,17 +191,63 @@ to the redirect to Google is verified against real Google infrastructure.
 
 ---
 
-## Phase 5 — Dashboard
+## Phase 5 — Frontend data layer ✅ complete
+
+The typed path from the browser to the API, with no visual design. Reference:
+[`frontend-data-layer.md`](./frontend-data-layer.md).
+
+**Types.** Nine modules under `types/` mirroring the 56 backend response schemas,
+with the invariants that are easy to get wrong written down: `has_data`
+separating "nothing ran" from "everything failed", `target_quantity` being 0
+when filtering by machine or shift, `KpiTrend.change_percentage` being nullable
+on purpose.
+
+**API modules.** Eight domain modules under `lib/api/`, all on the single Axios
+instance from Phase 1. Single-resource endpoints unwrap the `data` envelope;
+list endpoints return the whole `PaginatedResponse`, because the pagination
+metadata is what a table needs. Filters go through `buildParams`, which drops
+unset values rather than sending `?status=` and provoking a 422.
+
+**Query layer.** Centralized keys (`[domain, resource, params]`, filters
+normalized so `{page:1}` and `{page:1, machine_id:undefined}` share one entry),
+four stale tiers by volatility, and a five-state discriminator —
+`loading | refreshing | success | empty | error` — so a refetch never blanks the
+screen and an empty result never reads as a broken one.
+
+**Hooks.** Eight modules under `hooks/queries/`, one hook per endpoint, each
+owning its stale time. Only the dashboard summary polls.
+
+**Tables and charts.** Server-driven pagination and sorting
+(`hooks/useServerTable.ts`, `lib/table/`), with the 0-based/1-based conversion in
+one function and sortable column ids matching the backend's allow-list. Chart
+adapters reshape and label; they never calculate.
+
+**Backend-unavailable state.** `useBackendStatus` watches the query cache for
+transport and 5xx failures and renders one application-level notice with a retry,
+keeping last-known data visible and timestamped.
+
+**Development mocks.** Off by default, gated behind three independent conditions,
+loudly labelled, and impossible to reach in a production build.
+
+**Tests:** 97 frontend tests, ~3s, including a security suite that greps the
+source for the spec section 35 review items.
+
+**Deliberately not done:** any dashboard visual design.
+
+---
+
+## Phase 6 — Dashboard
 
 KPI cards, alerts panel, production trend, quality summary, machine status and
-inventory health, wired to `/api/v1/dashboard/summary` and `/trends`.
+inventory health, wired to `/api/v1/dashboard/summary` and `/trends` through the
+Phase 5 hooks.
 
 **Acceptance:** every async region has loading (skeleton), error (with retry),
 empty and success states. A reader understands factory status in 5–10 seconds.
 
 ---
 
-## Phase 6 — Detailed modules
+## Phase 7 — Detailed modules
 
 Production, quality, inventory, machines and analytics pages, each with a
 TanStack Table (sorting, filtering, pagination, column visibility, empty state),
@@ -210,7 +256,7 @@ where row counts justify it.
 
 ---
 
-## Phase 7 — Accessibility and responsive polish
+## Phase 8 — Accessibility and responsive polish
 
 Keyboard navigation, screen-reader semantics, heading hierarchy, contrast,
 focus states, touch targets, reduced motion, and text alternatives for every
@@ -218,7 +264,7 @@ chart. Target WCAG 2.2 AA.
 
 ---
 
-## Phase 8 — Performance
+## Phase 9 — Performance
 
 Review API call patterns, TanStack Query cache configuration, Redis hit rates,
 database query plans and indexes, bundle size, chart rendering and table
@@ -226,7 +272,7 @@ rendering. Measure before optimizing.
 
 ---
 
-## Phase 9 — Testing
+## Phase 10 — Testing
 
 Backend: authentication, validation, production/quality/inventory calculations,
 OEE, API responses, cache behaviour — plus the security tests required by spec
@@ -238,7 +284,7 @@ navigation, authenticated route behaviour.
 
 ---
 
-## Phase 10 — Final documentation
+## Phase 11 — Final documentation
 
 Architecture, setup, seed process, demo credentials, API reference, deployment
 and known assumptions.

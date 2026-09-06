@@ -27,6 +27,20 @@ const clientEnvSchema = z.object({
   NEXT_PUBLIC_APP_NAME: z.string().min(1).default("Automobile Component Factory"),
 
   NEXT_PUBLIC_APP_ENV: z.enum(["development", "staging", "production"]).default("development"),
+
+  /**
+   * Serve API responses from local fixtures instead of the backend.
+   *
+   * Development only, opt-in, and off by default. Spec section 30: mock data
+   * must never stand in for production data silently. Two independent
+   * conditions must hold before a fixture is served -- this flag, and a
+   * non-production build -- and `lib/api/mock/install.ts` refuses to install
+   * the adapter when either is missing.
+   */
+  NEXT_PUBLIC_ENABLE_API_MOCKS: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 });
 
 export type ClientEnv = z.infer<typeof clientEnvSchema>;
@@ -37,6 +51,7 @@ function parseClientEnv(): ClientEnv {
     NEXT_PUBLIC_API_TIMEOUT_MS: process.env.NEXT_PUBLIC_API_TIMEOUT_MS,
     NEXT_PUBLIC_APP_NAME: process.env.NEXT_PUBLIC_APP_NAME,
     NEXT_PUBLIC_APP_ENV: process.env.NEXT_PUBLIC_APP_ENV,
+    NEXT_PUBLIC_ENABLE_API_MOCKS: process.env.NEXT_PUBLIC_ENABLE_API_MOCKS,
   });
 
   if (!result.success) {
@@ -57,3 +72,15 @@ export const env: ClientEnv = parseClientEnv();
 
 export const isProduction = env.NEXT_PUBLIC_APP_ENV === "production";
 export const isDevelopment = env.NEXT_PUBLIC_APP_ENV === "development";
+
+/**
+ * Whether API mocking may be installed at all.
+ *
+ * Both conditions are required, and neither is sufficient. `NODE_ENV` is set by
+ * the build (`next build` makes it "production") and cannot be flipped by an
+ * environment variable at runtime, so a production bundle cannot serve fixtures
+ * even if someone sets the flag by mistake -- and the mock module is
+ * tree-shaken out of that bundle entirely.
+ */
+export const apiMocksEnabled =
+  process.env.NODE_ENV !== "production" && !isProduction && env.NEXT_PUBLIC_ENABLE_API_MOCKS;

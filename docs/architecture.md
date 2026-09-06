@@ -135,6 +135,17 @@ request must get its own cache, or one user's data could be served to another.
 The browser-side singleton lives in `providers/query-provider.tsx` and is held
 in `useState` so a re-render never discards the cache.
 
+**Five view states, derived once.** `lib/query/query-state.ts` collapses
+TanStack Query's flags into a single status: `loading`, `refreshing`, `success`,
+`empty`, `error`. Two of those distinctions are the reason the module exists.
+Separating `refreshing` from `loading` is what stops a filter change from
+blanking a table that already has rows on screen; separating `empty` from
+`success` is what stops a legitimately empty result from rendering as a table
+with headers, no rows and no explanation, which reads as a bug. Left to each
+component, those two decisions drift, and they drift silently.
+
+Full reference: [`frontend-data-layer.md`](./frontend-data-layer.md).
+
 ## 8. Authentication shape (Phase 3)
 
 Decided now because it constrains the Axios client and the CORS configuration:
@@ -459,7 +470,7 @@ it instead of being unguarded until someone notices.
 
 **Content-Security-Policy.** Spec section 17 asks for the headers to be reviewed
 and says a CSP must be designed against real frontend requirements. Those
-requirements do not exist yet — the dashboard is Phase 5. A policy written now
+requirements do not exist yet — the dashboard is Phase 6. A policy written now
 would be a guess, and a guessed CSP has a predictable life: it breaks something,
 someone adds `unsafe-inline`, and it protects nothing while appearing to. It is
 deferred with the reason recorded rather than filled in.
@@ -479,3 +490,43 @@ render-blocking external fetch and eliminates font-swap layout shift. For a
 dense operational data UI the visual cost is negligible. To adopt a bespoke
 typeface later, self-host the woff2 files and use `next/font/local`, which has
 no network dependency.
+
+## 23. Three caches, one source of truth
+
+The dashboard has caching in three places, and they answer different questions.
+
+| Layer | Scope | Lifetime | Question it answers |
+| --- | --- | --- | --- |
+| TanStack Query | One browser tab | Seconds to minutes | Did *this user* just see this? |
+| Redis | Shared, server-side | Per-endpoint TTL | Did *anyone* just ask this? |
+| PostgreSQL | — | Durable | What is true? |
+
+They are tuned independently, and neither cache is a statement about
+correctness: both are permitted to be stale, and only PostgreSQL is authoritative.
+This is what makes Redis optional at runtime — losing it makes the dashboard
+slower, not broken — and it is why a frontend stale time is never derived from a
+Redis TTL. Coupling them would mean a change to a server-side TTL silently
+altering how often a browser refetches.
+
+## 24. Calculation happens once, in the backend
+
+Every percentage the dashboard displays — OEE and its three terms, defect rate,
+first-pass yield, achievement against target, stock utilization, inventory
+health — is computed by `services/kpi.py` and sent as a number.
+
+The frontend formats it. Chart adapters reshape and label it. Table cells render
+it. Nothing in the browser divides one API field by another.
+
+The rule is not about tidiness. A second implementation of a metric does not
+announce itself: it agrees with the first almost everywhere and disagrees
+exactly where the edge cases live — the day a machine ran for four minutes, the
+shift with a zero denominator, the defect list truncated to twenty rows whose
+cumulative percentage no longer reaches 100. What a user sees then is two panels
+on one screen reporting different numbers for the same day, and no way to tell
+which is right.
+
+Cumulative percentages make the point sharply. `cumulative_percentage` on a
+defect depends on that row's position in the sorted set. An adapter that
+re-sorted the rows, or recomputed the running total over a truncated copy, would
+produce a Pareto curve that is wrong in a way no assertion about any single row
+would catch.

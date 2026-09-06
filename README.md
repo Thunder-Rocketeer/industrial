@@ -8,11 +8,12 @@ Built to the specification in
 [`automobile_component_factory_claude_code_spec_v2.md`](./automobile_component_factory_claude_code_spec_v2.md),
 which is the authoritative document for this project.
 
-> **Status: Phases 1–4 complete.**
+> **Status: Phases 1–5 complete.**
 > Repository structure, the Supabase schema and deterministic seed, the backend
 > API (repositories, services, KPI calculations, Redis caching, 44 endpoints),
-> and authentication — Google OAuth 2.0 / OIDC, JWT sessions, RBAC and the
-> frontend auth foundation. The dashboard UI is Phase 5 onward.
+> authentication — Google OAuth 2.0 / OIDC, JWT sessions, RBAC — and the
+> frontend data layer: typed API modules, TanStack Query hooks, server-driven
+> tables and chart adapters. The dashboard UI is Phase 6 onward.
 >
 > The schema and seed have **not yet been executed against a live Supabase
 > project** (no database was reachable from the development machine). See
@@ -21,6 +22,7 @@ which is the authoritative document for this project.
 > Reference: [`docs/api.md`](./docs/api.md) ·
 > [`docs/authentication.md`](./docs/authentication.md) ·
 > [`docs/database.md`](./docs/database.md) ·
+> [`docs/frontend-data-layer.md`](./docs/frontend-data-layer.md) ·
 > [`docs/architecture.md`](./docs/architecture.md) ·
 > [`docs/implementation-plan.md`](./docs/implementation-plan.md)
 
@@ -68,13 +70,17 @@ IR_Project/
 │   ├── components/             layout, dashboard, production, quality,
 │   │                           inventory, machines, charts, tables, ui
 │   ├── lib/
-│   │   ├── api/                centralized Axios client + error normalization
-│   │   ├── query/              TanStack Query client and query-key registry
+│   │   ├── api/                Axios client, 8 domain modules, param builder
+│   │   │   └── mock/           development-only fixtures, off by default
+│   │   ├── query/              query client, key registry, view-state derivation
+│   │   ├── table/              server-driven pagination, typed column defs
+│   │   ├── chart/              adapters from API shapes to chart input
 │   │   ├── constants/          cache tiers, pagination bounds
-│   │   └── utils/
-│   ├── hooks/                  data-fetching hooks
-│   ├── types/                  API contract types
+│   │   └── utils/              display formatting
+│   ├── hooks/queries/          8 modules, one hook per endpoint
+│   ├── types/                  API contract types (9 modules)
 │   ├── providers/              query, auth and session-expiry providers
+│   ├── tests/                  vitest: 97 tests
 │   └── proxy.ts                Next.js 16 route protection (not middleware.ts)
 │
 ├── server/                     FastAPI + Python 3.10
@@ -98,7 +104,7 @@ IR_Project/
 │   ├── migrations/             schema source of truth (8 migrations)
 │   └── schema.sql              generated single-file schema, for the SQL editor
 │
-├── docs/                       architecture, database reference, phase plan
+├── docs/                       architecture, database, API, auth, data layer, plan
 └── docker-compose.yml          Redis, plus optional full stack
 ```
 
@@ -274,6 +280,8 @@ npm run dev             # http://localhost:3000
 | `npm run lint` | ESLint |
 | `npm run lint:fix` | ESLint with autofix |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Vitest, single run (97 tests) |
+| `npm run test:watch` | Vitest in watch mode |
 | `npm run format` | Prettier, writing changes |
 | `npm run format:check` | Prettier, check only |
 
@@ -374,13 +382,17 @@ curl -s http://localhost:8000/api/v1/dashboard/summary | jq '.data.kpis[] | {lab
 cd server && pytest
 
 # frontend
-cd client && npm run lint && npm run typecheck && npm run build
+cd client && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-**466 tests, no external services required.** API tests override the service
-dependencies with fakes, the cache tests use an in-memory Redis stand-in that
-can be told to fail, and the SQL is validated by parsing it with the real
-PostgreSQL grammar (`pglast`).
+**466 backend tests and 97 frontend tests, no external services required.** API
+tests override the service dependencies with fakes, the cache tests use an
+in-memory Redis stand-in that can be told to fail, and the SQL is validated by
+parsing it with the real PostgreSQL grammar (`pglast`). On the frontend, the
+Axios adapter is stubbed so every request path is exercised without a network,
+and `tests/security.test.ts` greps the source for the review items in spec
+section 35 — no token in browser storage, no unsafe HTML, no arbitrary redirect,
+one Axios instance.
 
 A further **25 integration tests** run against a live database and are skipped
 unless `DATABASE_URL` is set. They are the ones that prove a column exists, a
