@@ -470,10 +470,17 @@ it instead of being unguarded until someone notices.
 
 **Content-Security-Policy.** Spec section 17 asks for the headers to be reviewed
 and says a CSP must be designed against real frontend requirements. Those
-requirements do not exist yet — the dashboard is Phase 6. A policy written now
+requirements did not exist yet — the dashboard was Phase 6. A policy written now
 would be a guess, and a guessed CSP has a predictable life: it breaks something,
 someone adds `unsafe-inline`, and it protects nothing while appearing to. It is
 deferred with the reason recorded rather than filled in.
+
+**Resolved in Phase 6.** The frontend now exists and its resource requirements
+were measured against a production build, not guessed. The policy, the evidence
+behind each clause, and the single relaxation it needs
+(`style-src-attr 'unsafe-inline'`, for chart geometry) are in
+[`security-headers.md`](./security-headers.md). It is documented and ready
+rather than enabled, because a CSP should ship report-only first.
 
 **HSTS.** It belongs at the TLS-terminating proxy, which knows whether the
 connection is HTTPS. Emitting it from an application served over `http://`
@@ -530,3 +537,65 @@ defect depends on that row's position in the sorted set. An adapter that
 re-sorted the rows, or recomputed the running total over a truncated copy, would
 produce a Pareto curve that is wrong in a way no assertion about any single row
 would catch.
+
+## 25. The dashboard renders; it does not decide
+
+Every number on the interface arrives calculated. That constraint shaped three
+choices that would otherwise look like over-engineering.
+
+**The dashboard is one request.** `/dashboard/summary` returns production,
+quality, inventory, machines, OEE, the KPI cards and the alerts together, and
+the backend computes its nine aggregates concurrently. Eight hooks would mean
+eight round trips, eight loading states, and a screen that assembles itself in
+pieces while a manager waits to learn whether the factory is all right.
+
+**Chart adapters map and label; they never calculate.** A recomputed defect rate
+would agree with the backend almost everywhere and disagree exactly where the
+edge cases live — the day a machine ran four minutes, the shift with a zero
+denominator, the truncated defect list whose cumulative share no longer reaches
+100. The user would then see two panels on one screen reporting different
+numbers for the same day, with no way to tell which is right.
+
+**Bar widths are the one exception, and are not numbers.** `TargetVsActual` and
+`StatusDistribution` scale a bar to a proportion. That is a drawing decision: it
+produces no figure anybody reads, and every percentage rendered as text beside
+it came from `services/kpi.py`.
+
+## 26. Status is a word first
+
+Spec section 45 and WCAG 1.4.1 both forbid conveying state by colour alone, and
+the usual reading of that is "add an icon". This application takes the stricter
+line: every status renders **text** — Running, Critical, Below target — with the
+tint and the dot as reinforcement.
+
+The reason is specific to where this runs. A factory floor has daylight washing
+out screens, monochrome print-outs pinned to a board, and roughly one man in
+twelve with a colour-vision deficiency. A status that depends on distinguishing
+amber from red is not a theoretical accessibility failure there; it is a
+practical one on a normal Tuesday.
+
+That decision is what forces the labels to come from the backend. `status_label`
+and `severity_label` are sent alongside every code, and the UI renders those
+strings rather than mapping codes to words itself — otherwise the interface
+develops a second vocabulary that drifts from the API's.
+
+## 27. Icons do not depend on the internet
+
+`@iconify/react` resolves an unknown icon name by fetching it from
+`api.iconify.design`, with two more public hosts as fallbacks. That is a
+reasonable default for a public web app and a poor one here: it makes every icon
+depend on a CDN being reachable from a network that may be segmented, it forces
+three third-party hosts into the CSP's `connect-src` for decoration, and it
+tells a third party which pages are being viewed.
+
+So the icons are extracted at build time instead. `npm run icons` scans the
+source, pulls exactly the 43 icons referenced out of the `@iconify-json/*`
+devDependencies, and writes a 13 KB data module that is registered at load. No
+request is ever made.
+
+The interesting part is the failure mode this creates and how it is closed.
+Adding an icon without regenerating the registry still renders correctly in
+development — Iconify quietly fetches it — so the regression is invisible
+exactly where it would be caught. `tests/icons.test.tsx` therefore renders every
+bundled icon with `fetch` instrumented and asserts zero calls, and separately
+asserts that every icon name in the source resolves locally.

@@ -8,12 +8,13 @@ Built to the specification in
 [`automobile_component_factory_claude_code_spec_v2.md`](./automobile_component_factory_claude_code_spec_v2.md),
 which is the authoritative document for this project.
 
-> **Status: Phases 1–5 complete.**
+> **Status: Phases 1–6 complete.**
 > Repository structure, the Supabase schema and deterministic seed, the backend
 > API (repositories, services, KPI calculations, Redis caching, 44 endpoints),
-> authentication — Google OAuth 2.0 / OIDC, JWT sessions, RBAC — and the
-> frontend data layer: typed API modules, TanStack Query hooks, server-driven
-> tables and chart adapters. The dashboard UI is Phase 6 onward.
+> authentication — Google OAuth 2.0 / OIDC, JWT sessions, RBAC — the frontend
+> data layer, and the full responsive dashboard UI: nine routes, a reusable
+> application shell, charts with text alternatives, server-driven tables and
+> URL-synchronized filters.
 >
 > The schema and seed have **not yet been executed against a live Supabase
 > project** (no database was reachable from the development machine). See
@@ -23,6 +24,8 @@ which is the authoritative document for this project.
 > [`docs/authentication.md`](./docs/authentication.md) ·
 > [`docs/database.md`](./docs/database.md) ·
 > [`docs/frontend-data-layer.md`](./docs/frontend-data-layer.md) ·
+> [`docs/dashboard-ui.md`](./docs/dashboard-ui.md) ·
+> [`docs/security-headers.md`](./docs/security-headers.md) ·
 > [`docs/architecture.md`](./docs/architecture.md) ·
 > [`docs/implementation-plan.md`](./docs/implementation-plan.md)
 
@@ -67,8 +70,15 @@ one-to-one and nothing else differs.
 IR_Project/
 ├── client/                     Next.js 16 + TypeScript + Tailwind CSS 4
 │   ├── app/                    App Router routes
-│   ├── components/             layout, dashboard, production, quality,
-│   │                           inventory, machines, charts, tables, ui
+│   ├── app/(app)/              9 authenticated routes, each page + view
+│   ├── components/
+│   │   ├── ui/                 Card, Button, Status, Drawer, States, Icon
+│   │   ├── layout/             AppShell, Sidebar, PageHeader, UserMenu
+│   │   ├── dashboard/          KpiCard, Gauges, AlertsPanel, LastUpdated
+│   │   ├── charts/             Recharts wrappers + accessible ChartFrame
+│   │   ├── tables/             DataTable, TablePagination
+│   │   ├── filters/            date range, select and debounced search
+│   │   └── data/               QueryBoundary, BackendUnavailable
 │   ├── lib/
 │   │   ├── api/                Axios client, 8 domain modules, param builder
 │   │   │   └── mock/           development-only fixtures, off by default
@@ -77,10 +87,11 @@ IR_Project/
 │   │   ├── chart/              adapters from API shapes to chart input
 │   │   ├── constants/          cache tiers, pagination bounds
 │   │   └── utils/              display formatting
-│   ├── hooks/queries/          8 modules, one hook per endpoint
+│   ├── hooks/                  queries/, useServerTable, useUrlFilters
+│   ├── scripts/                generate-icons.mjs (offline icon registry)
 │   ├── types/                  API contract types (9 modules)
 │   ├── providers/              query, auth and session-expiry providers
-│   ├── tests/                  vitest: 97 tests
+│   ├── tests/                  vitest: 201 tests
 │   └── proxy.ts                Next.js 16 route protection (not middleware.ts)
 │
 ├── server/                     FastAPI + Python 3.10
@@ -280,7 +291,8 @@ npm run dev             # http://localhost:3000
 | `npm run lint` | ESLint |
 | `npm run lint:fix` | ESLint with autofix |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Vitest, single run (97 tests) |
+| `npm test` | Vitest, single run (201 tests) |
+| `npm run icons` | Regenerate the bundled icon registry |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run format` | Prettier, writing changes |
 | `npm run format:check` | Prettier, check only |
@@ -385,14 +397,16 @@ cd server && pytest
 cd client && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-**466 backend tests and 97 frontend tests, no external services required.** API
+**466 backend tests and 201 frontend tests, no external services required.** API
 tests override the service dependencies with fakes, the cache tests use an
 in-memory Redis stand-in that can be told to fail, and the SQL is validated by
 parsing it with the real PostgreSQL grammar (`pglast`). On the frontend, the
 Axios adapter is stubbed so every request path is exercised without a network,
-and `tests/security.test.ts` greps the source for the review items in spec
-section 35 — no token in browser storage, no unsafe HTML, no arbitrary redirect,
-one Axios instance.
+and `tests/security.test.ts` greps the source for the security review items —
+no token in browser storage, no unsafe HTML, no arbitrary redirect, one Axios
+instance, one chart library, one icon library. `tests/a11y.test.tsx` renders the
+real dashboard and checks heading order, accessible names, duplicate ids and
+chart text alternatives.
 
 A further **25 integration tests** run against a live database and are skipped
 unless `DATABASE_URL` is set. They are the ones that prove a column exists, a

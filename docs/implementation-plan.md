@@ -236,27 +236,58 @@ source for the spec section 35 review items.
 
 ---
 
-## Phase 6 — Dashboard
+## Phase 6 — Dashboard UI ✅ complete
 
-KPI cards, alerts panel, production trend, quality summary, machine status and
-inventory health, wired to `/api/v1/dashboard/summary` and `/trends` through the
-Phase 5 hooks.
+The full responsive operations interface. Reference:
+[`dashboard-ui.md`](./dashboard-ui.md) and
+[`security-headers.md`](./security-headers.md).
 
-**Acceptance:** every async region has loading (skeleton), error (with retry),
-empty and success states. A reader understands factory status in 5–10 seconds.
+**Nine routes.** `/dashboard`, `/production`, `/quality`, `/inventory`,
+`/machines`, `/machines/{id}`, `/analytics`, `/alerts`, `/maintenance`, plus a
+restyled `/login`. Each is a Server Component page mounting a client view, so
+the client boundary starts at the first thing that genuinely needs state rather
+than at the route.
+
+**Shell.** Persistent sidebar at `lg`+, the same nav in a focus-trapped drawer
+below it. One `min-w-0` chain down the main column is what actually prevents a
+wide table from pushing the page into horizontal scroll.
+
+**Design system.** Semantic CSS tokens in `globals.css`, consumed through
+Tailwind, so dark mode is defined once. Flat surfaces, 1px borders, 6px radius,
+tabular figures — an operations console, not an admin template.
+
+**Status is never colour alone.** Everything collapses to five tones and every
+badge renders a word. The mapping functions convert a *code* to a tone; the
+label always comes from the backend.
+
+**Charts.** Recharts, one library. Every chart is wrapped in `ChartFrame`, which
+supplies a visually hidden text summary and the data as a real table — the
+accessible equivalent WCAG 1.1.1 requires for a non-text element.
+
+**States.** `QueryBoundary` renders the five Phase 5 query states once, for
+everything. `refreshing` keeps the previous content mounted, so the 30-second
+poll never blanks the screen; a retry appears only where `canRetry` allows.
+
+**Filters in the URL.** Allow-listed keys only, so a crafted link cannot inject
+a query parameter the page never meant to send. Reload, Back/Forward and
+sharing all work.
+
+**Icons bundled locally.** `@iconify/react` would otherwise fetch every icon
+from `api.iconify.design` at runtime. `npm run icons` extracts the 43 icons used
+into a 13 KB module; `tests/icons.test.tsx` asserts zero fetch calls, which is
+what lets the CSP omit three CDN hosts from `connect-src`.
+
+**Tests:** 201 frontend tests. Added: dashboard rendering and states, structural
+accessibility, navigation and permission-aware UX, tables, filters and URL sync,
+auth UI and session expiry, charts, icons, and seven more security assertions.
+
+**Deliberately not done:** live end-to-end verification against a running
+backend (no database is reachable from this machine), and enforcing the CSP —
+documented and ready, but rolled out report-only first by design.
 
 ---
 
-## Phase 7 — Detailed modules
-
-Production, quality, inventory, machines and analytics pages, each with a
-TanStack Table (sorting, filtering, pagination, column visibility, empty state),
-filters, and the charts from spec section 32. Virtualization via TanStack Virtual
-where row counts justify it.
-
----
-
-## Phase 8 — Accessibility and responsive polish
+## Phase 7 — Accessibility and responsive polish
 
 Keyboard navigation, screen-reader semantics, heading hierarchy, contrast,
 focus states, touch targets, reduced motion, and text alternatives for every
@@ -264,7 +295,7 @@ chart. Target WCAG 2.2 AA.
 
 ---
 
-## Phase 9 — Performance
+## Phase 8 — Performance
 
 Review API call patterns, TanStack Query cache configuration, Redis hit rates,
 database query plans and indexes, bundle size, chart rendering and table
@@ -272,7 +303,7 @@ rendering. Measure before optimizing.
 
 ---
 
-## Phase 10 — Testing
+## Phase 9 — Testing
 
 Backend: authentication, validation, production/quality/inventory calculations,
 OEE, API responses, cache behaviour — plus the security tests required by spec
@@ -284,7 +315,7 @@ navigation, authenticated route behaviour.
 
 ---
 
-## Phase 11 — Final documentation
+## Phase 10 — Final documentation
 
 Architecture, setup, seed process, demo credentials, API reference, deployment
 and known assumptions.

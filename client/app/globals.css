@@ -1,12 +1,13 @@
 @import "tailwindcss";
 
 /*
- * Design foundations.
+ * Design foundations (spec sections 20 and 32).
  *
- * Spec section 20 calls for a modern industrial SaaS aesthetic: clean, dense,
- * strong hierarchy, minimal noise. The full status-colour system and component
- * tokens are introduced with the app shell; this file holds only what the
- * whole application depends on.
+ * The target is an industrial operations console: dense, restrained, and
+ * legible at a glance from a few feet away. That rules out the decoration a
+ * generic admin template reaches for -- gradients, heavy shadows, large rounded
+ * cards, glassmorphism -- because every one of them costs contrast or space
+ * that operational data needs.
  *
  * Typography note: the project deliberately uses a system font stack rather
  * than `next/font/google`. Google Fonts are fetched at build time, which makes
@@ -25,32 +26,167 @@
     monospace;
 }
 
+/*
+ * SEMANTIC TOKENS
+ *
+ * Components reference these, never a raw palette value. One consequence
+ * matters more than tidiness: dark mode is defined once, here, so a component
+ * cannot forget it.
+ *
+ * The status colours are paired -- a `-fg` for text and an accent for a dot or
+ * a bar. Both are chosen to clear 4.5:1 against the surface they sit on, since
+ * a status that fails contrast is a status nobody reads. And per spec section
+ * 45 none of them is ever the only signal: every status in this application
+ * carries a word.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f5f7;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eceef1;
+
+  --foreground: #18181b;
+  --muted: #52525b;
+  --subtle: #71717a;
+
+  --border: #d9dce1;
+  --border-strong: #b9bec7;
+
+  --accent: #1d4ed8;
+  --accent-fg: #ffffff;
+  --accent-soft: #eff4ff;
+
+  --good: #047857;
+  --good-fg: #046c50;
+  --good-soft: #e7f6f0;
+
+  --warn: #b45309;
+  --warn-fg: #9a4a08;
+  --warn-soft: #fdf3e3;
+
+  --critical: #be123c;
+  --critical-fg: #b01235;
+  --critical-soft: #fdeef1;
+
+  --neutral: #52525b;
+  --neutral-fg: #52525b;
+  --neutral-soft: #f1f2f4;
+
+  /* Chart series. Ordered so the first two are distinguishable to the most
+     common colour-vision deficiencies; charts also vary stroke style. */
+  --chart-1: #1d4ed8;
+  --chart-2: #b45309;
+  --chart-3: #047857;
+  --chart-4: #7c3aed;
+  --chart-5: #be123c;
+  --chart-grid: #e4e6ea;
+  --chart-axis: #71717a;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #09090b;
+    --surface: #131316;
+    --surface-raised: #18181c;
+    --surface-sunken: #0e0e11;
+
+    --foreground: #fafafa;
+    --muted: #a1a1aa;
+    --subtle: #8b8b94;
+
+    --border: #2a2a31;
+    --border-strong: #3f3f47;
+
+    --accent: #3b82f6;
+    --accent-fg: #06090f;
+    --accent-soft: #14203a;
+
+    --good: #10b981;
+    --good-fg: #4ade9f;
+    --good-soft: #0d2b22;
+
+    --warn: #f59e0b;
+    --warn-fg: #fbbf4a;
+    --warn-soft: #2e2109;
+
+    --critical: #f43f5e;
+    --critical-fg: #fb7185;
+    --critical-soft: #33101a;
+
+    --neutral: #a1a1aa;
+    --neutral-fg: #a1a1aa;
+    --neutral-soft: #1c1c21;
+
+    --chart-1: #60a5fa;
+    --chart-2: #fbbf24;
+    --chart-3: #34d399;
+    --chart-4: #a78bfa;
+    --chart-5: #fb7185;
+    --chart-grid: #26262c;
+    --chart-axis: #8b8b94;
   }
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+
+  --color-border-base: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-good: var(--good);
+  --color-good-fg: var(--good-fg);
+  --color-good-soft: var(--good-soft);
+
+  --color-warn: var(--warn);
+  --color-warn-fg: var(--warn-fg);
+  --color-warn-soft: var(--warn-soft);
+
+  --color-critical: var(--critical);
+  --color-critical-fg: var(--critical-fg);
+  --color-critical-soft: var(--critical-soft);
+
+  --color-neutral-status: var(--neutral);
+  --color-neutral-fg: var(--neutral-fg);
+  --color-neutral-soft: var(--neutral-soft);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  /* Tabular figures everywhere. In a column of quantities, proportional digits
+     make the numbers jitter and the eye cannot scan down them. */
+  font-variant-numeric: tabular-nums;
 }
 
 /*
- * Spec section 19: respect the user's reduced-motion preference. Applied
- * globally so no individual component has to remember to honour it.
+ * A single focus treatment for the whole application (spec section 18).
+ *
+ * `:focus-visible` rather than `:focus`, so a mouse click does not leave a ring
+ * behind but keyboard navigation always shows one. Defined globally because a
+ * missing focus ring is invisible until someone tries to use the keyboard, by
+ * which point it is in twenty components.
+ */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/*
+ * Spec sections 18 and 34: respect the user's reduced-motion preference.
+ * Applied globally so no individual component has to remember to honour it.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -61,4 +197,11 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Recharts sizes itself from its container; without this the SVG can force a
+   parent wider than the viewport and reintroduce horizontal page scroll. */
+.recharts-wrapper,
+.recharts-surface {
+  max-width: 100%;
 }

@@ -228,3 +228,79 @@ describe("a single Axios instance", () => {
     expect(creators).toEqual(["lib/api/client.ts"]);
   });
 });
+
+describe("UI-layer security (Phase 6)", () => {
+  it("builds every internal link from a route literal, not from API data", () => {
+    /*
+     * The risk is a URL that comes from the database reaching an `href`, where
+     * a stored `javascript:` string becomes a clickable payload.
+     *
+     * Only one place in this application lets API data influence a URL at all:
+     * `alertSubject`, which turns an alert's machine id into a link. It builds
+     * the path from a literal prefix and interpolates only the id, so the
+     * scheme can never be attacker-chosen. Asserting that specific shape is
+     * worth more than sweeping for `href={...}`, which cannot tell a route
+     * constant from a response field.
+     */
+    const alerts = sourceFiles.find((file) => file.path === "components/dashboard/AlertsPanel.tsx");
+    expect(alerts?.content).toContain("href: alert.machine_id ? `/machines/${alert.machine_id}`");
+
+    // And no href anywhere is assigned straight from a response-shaped field.
+    const fromApiField = filesMatching(/href=\{[^}]*(data|response|item|row|record)\.[a-z_]*url/i);
+    expect(fromApiField).toEqual([]);
+  });
+
+  it("keeps target=_blank paired with rel=noopener", () => {
+    // A `target="_blank"` link without `rel` hands the opened page a reference
+    // to this one through `window.opener`.
+    const blankLinks = sourceFiles.filter(
+      ({ content }) =>
+        /target=["']_blank["']/.test(content) && !/rel=["'][^"']*noopener/.test(content),
+    );
+    expect(blankLinks.map((file) => file.path)).toEqual([]);
+  });
+
+  it("gates navigation links on permissions as UX only, never as the check", () => {
+    // The nav map must not be the place a permission decision is enforced.
+    // Every page fetches through the API, which authorizes independently.
+    const navigation = sourceFiles.find((file) => file.path === "lib/navigation.ts");
+    expect(navigation?.content).toContain("not a security control");
+  });
+
+  it("passes route parameters to the API rather than into markup", () => {
+    // A machine id from the URL reaches `useMachine(machineId)` and nothing
+    // else. Interpolating it into HTML or a redirect would be the injection
+    // path.
+    const detail = sourceFiles.find((file) =>
+      file.path.endsWith("machines/[machineId]/MachineDetailView.tsx"),
+    );
+    expect(detail?.content).toContain("useMachine(machineId)");
+    expect(detail?.content).not.toContain("dangerouslySetInnerHTML");
+  });
+
+  it("validates a redirect target before using it", () => {
+    // `?next=https://evil.example` must not survive into a navigation.
+    const login = sourceFiles.find((file) => file.path === "app/login/page.tsx");
+    expect(login?.content).toContain("safeNextPath");
+    expect(login?.content).toContain('value.startsWith("//")');
+  });
+
+  it("uses exactly one charting library", () => {
+    // Spec section 17: do not install multiple charting libraries.
+    const chartImports = new Set<string>();
+    for (const { content } of sourceFiles) {
+      for (const match of content.matchAll(/from "(recharts|chart\.js|victory|visx|nivo)[^"]*"/g)) {
+        chartImports.add(match[1]);
+      }
+    }
+    expect([...chartImports]).toEqual(["recharts"]);
+  });
+
+  it("uses exactly one icon library", () => {
+    // Spec section 33: do not introduce another icon library.
+    const iconImports = sourceFiles.filter(({ content }) =>
+      /from "(lucide-react|react-icons|@heroicons)/.test(content),
+    );
+    expect(iconImports.map((file) => file.path)).toEqual([]);
+  });
+});

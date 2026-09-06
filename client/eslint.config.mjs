@@ -30,6 +30,13 @@ const eslintConfig = defineConfig([
     },
   },
 
+  // Build scripts are command-line tools: printing to stdout is their output,
+  // not a stray debug statement.
+  {
+    files: ["scripts/**/*.mjs"],
+    rules: { "no-console": "off" },
+  },
+
   // Must stay last: turns off stylistic rules that conflict with Prettier.
   prettier,
 

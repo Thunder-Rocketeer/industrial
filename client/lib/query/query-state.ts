@@ -51,6 +51,17 @@ export interface QueryState<TData> {
   isEmpty: boolean;
   isError: boolean;
 
+  /**
+   * Epoch milliseconds of the last successful fetch, or null if none.
+   *
+   * Surfaced so the UI can say *when* a number arrived (spec section 3:
+   * "Updated 24 seconds ago"). Without it a dashboard that refreshes on a timer
+   * gives the reader no way to tell a current figure from a stale one, which is
+   * the difference between acting on a machine stopping now and acting on one
+   * that stopped ten minutes ago.
+   */
+  updatedAt: number | null;
+
   /** Re-run the query. Wired to a retry button. */
   refetch: () => void;
 }
@@ -92,6 +103,9 @@ export function toQueryState<TData>(
     void query.refetch();
   };
 
+  // TanStack Query reports 0 when a query has never resolved.
+  const updatedAt = query.dataUpdatedAt > 0 ? query.dataUpdatedAt : null;
+
   if (query.isError) {
     return {
       status: "error",
@@ -105,6 +119,7 @@ export function toQueryState<TData>(
       isSuccess: false,
       isEmpty: false,
       isError: true,
+      updatedAt,
       refetch,
     };
   }
@@ -119,6 +134,7 @@ export function toQueryState<TData>(
       isSuccess: false,
       isEmpty: false,
       isError: false,
+      updatedAt,
       refetch,
     };
   }
@@ -137,6 +153,7 @@ export function toQueryState<TData>(
     isSuccess: !empty,
     isEmpty: empty,
     isError: false,
+    updatedAt,
     refetch,
   };
 }

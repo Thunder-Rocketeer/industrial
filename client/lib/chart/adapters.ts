@@ -18,7 +18,12 @@
  * 19: charts must have accessible descriptions or supporting data).
  */
 import { formatNumber, formatPercentage } from "@/lib/utils/format";
-import type { OEETrendPoint } from "@/types/analytics";
+import type {
+  DowntimeByMachine,
+  EfficiencyTrendPoint,
+  OEEByMachine,
+  OEETrendPoint,
+} from "@/types/analytics";
 import type { InventoryTrendPoint } from "@/types/inventory";
 import type { ProductionTrendPoint } from "@/types/production";
 import type { DefectSummary, DefectTrendPoint } from "@/types/quality";
@@ -274,6 +279,115 @@ export function toInventoryTrendChart(points: InventoryTrendPoint[], unit: strin
     table: {
       columns: ["Date", `Balance (${unit})`],
       rows: balance.map((point) => [point.label, point.value]),
+    },
+  };
+}
+
+// =============================================================================
+// Fleet comparisons
+// =============================================================================
+
+/**
+ * OEE per machine, for the fleet comparison bar chart.
+ *
+ * The backend returns these worst-first, and that order is preserved: the point
+ * of the chart is that the machine at the top is the one to look at, and
+ * re-sorting alphabetically here would throw away the ranking the endpoint
+ * exists to produce.
+ */
+export function toOeeByMachineChart(machines: OEEByMachine[]): ChartData {
+  const unit = "%";
+  const points = machines.map((machine) => ({
+    label: machine.machine_code,
+    value: machine.oee_percentage,
+    unit,
+  }));
+
+  return {
+    series: [{ key: "oee", label: "OEE", unit, points }],
+    summary:
+      machines.length === 0
+        ? "No machine OEE data for the selected period."
+        : `OEE for ${machines.length} machines, lowest first. ` +
+          `${machines[0].machine_name} is lowest at ${formatPercentage(machines[0].oee_percentage)}.`,
+    table: {
+      columns: ["Machine", "OEE", "Availability", "Performance", "Quality"],
+      rows: machines.map((machine) => [
+        `${machine.machine_code} — ${machine.machine_name}`,
+        formatPercentage(machine.oee_percentage),
+        formatPercentage(machine.availability_percentage),
+        formatPercentage(machine.performance_percentage),
+        formatPercentage(machine.quality_percentage),
+      ]),
+    },
+  };
+}
+
+/** Downtime minutes per machine, worst first. */
+export function toDowntimeByMachineChart(machines: DowntimeByMachine[]): ChartData {
+  const unit = "min";
+  const points = machines.map((machine) => ({
+    label: machine.machine_code,
+    value: machine.downtime_minutes,
+    unit,
+  }));
+
+  return {
+    series: [{ key: "downtime", label: "Downtime", unit, points }],
+    summary:
+      machines.length === 0
+        ? "No downtime recorded for the selected period."
+        : `Downtime for ${machines.length} machines, worst first. ` +
+          `${machines[0].machine_name} lost ${formatNumber(machines[0].downtime_minutes)} minutes, ` +
+          `${formatPercentage(machines[0].downtime_percentage)} of planned time.`,
+    table: {
+      columns: ["Machine", "Downtime (min)", "Planned (min)", "Share of planned"],
+      rows: machines.map((machine) => [
+        `${machine.machine_code} — ${machine.machine_name}`,
+        machine.downtime_minutes,
+        machine.planned_minutes,
+        formatPercentage(machine.downtime_percentage),
+      ]),
+    },
+  };
+}
+
+/**
+ * Daily efficiency and target achievement.
+ *
+ * Both are percentages, so they share one axis honestly. They answer different
+ * questions -- efficiency is output against plan, achievement is output against
+ * target -- and seeing them diverge is the point of plotting them together.
+ */
+export function toEfficiencyTrendChart(points: EfficiencyTrendPoint[]): ChartData {
+  const unit = "%";
+  const efficiency = points.map((point) => ({
+    label: point.bucket_date,
+    value: point.efficiency_percentage,
+    unit,
+  }));
+  const achievement = points.map((point) => ({
+    label: point.bucket_date,
+    value: point.achievement_percentage,
+    unit,
+  }));
+
+  return {
+    series: [
+      { key: "efficiency", label: "Efficiency (vs plan)", unit, points: efficiency },
+      { key: "achievement", label: "Achievement (vs target)", unit, points: achievement },
+    ],
+    summary: describe("Production efficiency", efficiency, unit),
+    table: {
+      columns: ["Date", "Planned", "Produced", "Target", "Efficiency", "Achievement"],
+      rows: points.map((point) => [
+        point.bucket_date,
+        point.planned_quantity,
+        point.produced_quantity,
+        point.target_quantity,
+        formatPercentage(point.efficiency_percentage),
+        formatPercentage(point.achievement_percentage),
+      ]),
     },
   };
 }
