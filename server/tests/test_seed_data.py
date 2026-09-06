@@ -185,7 +185,7 @@ def test_seeded_users_carry_no_credentials(dataset: SeedDataset) -> None:
     account once OAuth is wired up in Phase 3.
     """
     for user in dataset.users:
-        assert user["google_sub"] is None
+        assert user["provider_subject"] is None
         assert user["auth_user_id"] is None
         assert "password" not in user
         assert "password_hash" not in user

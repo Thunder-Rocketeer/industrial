@@ -324,10 +324,12 @@ class FactoryDataGenerator:
                     "email": user.email,
                     "full_name": user.full_name,
                     "role_id": derive_id("role", user.role.value),
+                    "provider": "google",
                     # Populated by the OAuth flow on first sign-in, not seeded:
                     # a seeded value would claim a Google identity that does not
-                    # exist.
-                    "google_sub": None,
+                    # exist, and anyone who knew it could impersonate the account.
+                    "provider_subject": None,
+                    "avatar_url": None,
                     "auth_user_id": None,
                     "is_active": True,
                     "last_login_at": None,

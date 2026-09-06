@@ -24,6 +24,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.sessions import SessionMiddleware
 
 from app import __version__
 from app.api.router import api_router
@@ -35,7 +36,10 @@ from app.db.connection import DatabaseNotConfiguredError
 from app.db.pool import DatabasePool
 from app.repositories.base import UnknownSortFieldError
 from app.schemas.common import ErrorDetail, ErrorResponse
+from app.security.csrf import CsrfError, validate as validate_csrf
+from app.security.oauth import build_oauth_registry, is_configured
 from app.security.rate_limit import RateLimiter, client_identifier, parse_rate_limit
+from app.security.revocation import TokenRevocationStore
 from app.utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -81,6 +85,13 @@ OPENAPI_TAGS = [
             "the most expensive queries in the API and carry a stricter rate limit."
         ),
     },
+    {
+        "name": "Authentication",
+        "description": (
+            "Google OAuth 2.0 / OpenID Connect sign-in, session management and "
+            "the current user. Every other tag requires a session."
+        ),
+    },
     {"name": "Alerts", "description": "Operational alerts by severity and status."},
     {"name": "Maintenance", "description": "Scheduled and completed maintenance work."},
     {"name": "Health", "description": "Liveness and readiness probes."},
@@ -111,6 +122,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.cache = CacheService(cache_client, CacheKeys(settings.cache_key_prefix), settings)
     app.state.rate_limiter = RateLimiter(cache_client)
+    # Shares the Redis client with the cache and the limiter, so all three
+    # degrade together rather than each discovering an outage separately.
+    app.state.revocation_store = TokenRevocationStore(cache_client)
+    app.state.oauth = build_oauth_registry(settings)
 
     logger.info(
         "Application starting",
@@ -119,6 +134,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "version": __version__,
             "cache_enabled": cache_client.enabled,
             "database_configured": pool.is_open,
+            "google_oauth_configured": is_configured(settings),
         },
     )
     yield
@@ -163,8 +179,15 @@ def _policy_for(request: Request, settings: Settings) -> str:
         # Orchestrators poll liveness frequently; throttling it would produce a
         # false outage.
         return settings.rate_limit_health
-    if "/auth" in path:
+    if "/auth/google" in path:
+        # The OAuth endpoints, strictest of all: they are unauthenticated, they
+        # reach an external provider, and they are the natural target for
+        # someone hammering sign-in.
         return settings.rate_limit_oauth
+    if "/auth" in path:
+        # /auth/me, /auth/logout, /auth/csrf. Called routinely by a signed-in
+        # frontend, so moderate rather than strict.
+        return settings.rate_limit_authenticated
     if "/analytics" in path:
         return settings.rate_limit_analytics
     # Phase 4 populates `user_id`; until then every request is unauthenticated.
@@ -206,6 +229,37 @@ def register_middleware(app: FastAPI, settings: Settings) -> None:
             },
         )
         return response
+
+    @app.middleware("http")
+    async def csrf_protection(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """Reject cross-site state-changing requests (spec sections 10 and 59).
+
+        Only applies to unsafe methods on requests that carry a session cookie.
+        A GET changes nothing, and an anonymous POST has no session for an
+        attacker to ride.
+        """
+        try:
+            validate_csrf(request, settings)
+        except CsrfError as exc:
+            request_id = getattr(request.state, "request_id", None)
+            logger.warning(
+                "security.csrf_rejected",
+                extra={
+                    "request_id": request_id,
+                    "path": request.url.path,
+                    "reason": exc.reason,
+                },
+            )
+            return _error_response(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="CSRF_VALIDATION_FAILED",
+                message=("This request could not be verified. Reload the page and try again."),
+                request_id=request_id,
+            )
+        return await call_next(request)
 
     @app.middleware("http")
     async def security_headers(
@@ -293,6 +347,21 @@ def register_middleware(app: FastAPI, settings: Settings) -> None:
             response.headers[header] = value
         return response
 
+    # Carries the in-flight OAuth transaction -- Authlib stores the `state`,
+    # `nonce` and PKCE verifier here between the redirect to Google and the
+    # callback. Signed with SECRET_KEY, HttpOnly, and scoped to the auth path so
+    # it is not sent with every API request. Short-lived: an OAuth round trip
+    # takes seconds, and a stale transaction is only useful to an attacker.
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.secret_key or "insecure-development-only",
+        session_cookie=settings.oauth_cookie_name,
+        max_age=settings.oauth_transaction_max_age_seconds,
+        same_site="lax",
+        https_only=settings.cookie_secure,
+        path=f"{settings.api_v1_prefix}/auth",
+    )
+
     # Spec section 61: explicit origin allow-list, never a wildcard. Credentials
     # are enabled because the session travels in an HTTP-only cookie.
     app.add_middleware(
@@ -301,12 +370,15 @@ def register_middleware(app: FastAPI, settings: Settings) -> None:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", REQUEST_ID_HEADER, "X-CSRF-Token"],
+        # The frontend reads X-Auth-Error to tell an expired session from an
+        # absent one without parsing the body.
         expose_headers=[
             REQUEST_ID_HEADER,
             "Retry-After",
             "X-RateLimit-Limit",
             "X-RateLimit-Remaining",
             "X-RateLimit-Reset",
+            "X-Auth-Error",
         ],
         max_age=600,
     )
@@ -322,11 +394,18 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # Headers set on the exception are preserved. The auth dependencies use
+        # this to send `WWW-Authenticate` and `X-Auth-Error`, which is how the
+        # frontend distinguishes an expired session from an absent one without
+        # parsing the body or matching on message text.
+        headers = dict(getattr(exc, "headers", None) or {})
+        code = headers.pop("X-Auth-Error", None) or f"HTTP_{exc.status_code}"
         return _error_response(
             status_code=exc.status_code,
-            code=f"HTTP_{exc.status_code}",
+            code=code,
             message=str(exc.detail),
             request_id=getattr(request.state, "request_id", None),
+            headers=headers or None,
         )
 
     @app.exception_handler(RequestValidationError)

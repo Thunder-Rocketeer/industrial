@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.api.routes.production import COMMON_ERRORS
 from app.dependencies import QualityServiceDep
@@ -22,8 +22,17 @@ from app.schemas.quality import (
     QualityRecord,
     QualitySummary,
 )
+from app.security.dependencies import require_permission
+from app.security.policy import Permission
 
-router = APIRouter(prefix="/quality", tags=["Quality"])
+#: Every endpoint on this router requires QUALITY_READ. Declared once at
+#: the router rather than per route, so an endpoint added later inherits
+#: the protection instead of being unguarded until someone notices.
+router = APIRouter(
+    prefix="/quality",
+    tags=["Quality"],
+    dependencies=[Depends(require_permission(Permission.QUALITY_READ))],
+)
 
 
 @router.get(

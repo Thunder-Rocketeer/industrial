@@ -142,7 +142,17 @@ def test_dry_run_writes_nothing(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_truncate_is_refused_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
     """The seed is a development tool and must not empty a production database."""
-    production = Settings(app_env=Environment.PRODUCTION, _env_file=None)
+    production = Settings(
+        app_env=Environment.PRODUCTION,
+        secret_key="t" * 64,
+        cookie_secure=True,
+        debug=False,
+        google_redirect_uri="https://api.example.com/cb",
+        frontend_login_success_url="https://app.example.com/dashboard",
+        frontend_login_failure_url="https://app.example.com/login",
+        cors_allowed_origins=["https://app.example.com"],
+        _env_file=None,
+    )
     monkeypatch.setattr("app.db.seed.get_settings", lambda: production)
 
     assert main(["--truncate", "--dry-run"]) == 2

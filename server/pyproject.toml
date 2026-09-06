@@ -48,6 +48,12 @@ ignore = [
 "app/db/seed.py" = ["T201"]
 "app/db/verify.py" = ["T201"]
 "tools/*.py" = ["T201"]
+# S105 flags any constant whose name contains "TOKEN" as a possible hardcoded
+# password. In these two modules the matches are an audit action name
+# ("AUTH.TOKEN_REVOKED") and a JWT `typ` claim value ("access") -- both are
+# public vocabulary, and neither is a credential.
+"app/security/jwt.py" = ["S105"]
+"app/services/audit_service.py" = ["S105"]
 # The generator draws from `random` to synthesise demo production figures.
 # Nothing here is a secret, a token or a key -- S311 is about cryptographic
 # suitability, which does not apply to simulated factory output. Determinism is

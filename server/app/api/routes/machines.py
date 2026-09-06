@@ -6,15 +6,24 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.routes.production import COMMON_ERRORS
 from app.dependencies import MachineServiceDep
 from app.schemas.common import Envelope
 from app.schemas.filters import MachineFilters
 from app.schemas.machines import MachineDetail, MachineFleetSummary, MachineSummary
+from app.security.dependencies import require_permission
+from app.security.policy import Permission
 
-router = APIRouter(prefix="/machines", tags=["Machines"])
+#: Every endpoint on this router requires MACHINES_READ. Declared once at
+#: the router rather than per route, so an endpoint added later inherits
+#: the protection instead of being unguarded until someone notices.
+router = APIRouter(
+    prefix="/machines",
+    tags=["Machines"],
+    dependencies=[Depends(require_permission(Permission.MACHINES_READ))],
+)
 
 
 @router.get(

@@ -22,13 +22,18 @@ from app.cache.service import CacheService
 from app.config import Settings, get_settings
 from app.db.pool import DatabasePool
 from app.repositories.alerts import AlertRepository
+from app.repositories.audit import AuditRepository
 from app.repositories.inventory import InventoryRepository
 from app.repositories.machines import MachineRepository
 from app.repositories.maintenance import MaintenanceRepository
 from app.repositories.production import ProductionRepository
 from app.repositories.quality import QualityRepository
+from app.repositories.users import UserRepository
+from app.security.revocation import TokenRevocationStore
 from app.services.alert_service import AlertService
 from app.services.analytics_service import AnalyticsService
+from app.services.audit_service import AuditService
+from app.services.auth_service import AuthService
 from app.services.dashboard_service import DashboardService
 from app.services.inventory_service import InventoryService
 from app.services.machine_service import MachineService
@@ -106,6 +111,23 @@ def get_alert_repository(connection: ConnectionDep) -> AlertRepository:
     return AlertRepository(connection)
 
 
+def get_user_repository(connection: ConnectionDep) -> UserRepository:
+    return UserRepository(connection)
+
+
+def get_audit_repository(connection: ConnectionDep) -> AuditRepository:
+    return AuditRepository(connection)
+
+
+def get_revocation_store(request: Request) -> TokenRevocationStore:
+    """Return the revocation store built during startup.
+
+    Backed by the same Redis client as the cache and the rate limiter, so all
+    three degrade together rather than each discovering the outage separately.
+    """
+    return request.app.state.revocation_store
+
+
 # =============================================================================
 # Services
 # =============================================================================
@@ -153,6 +175,20 @@ def get_maintenance_service(
     return MaintenanceService(repository)
 
 
+def get_audit_service(
+    repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+) -> AuditService:
+    return AuditService(repository)
+
+
+def get_auth_service(
+    repository: Annotated[UserRepository, Depends(get_user_repository)],
+    audit: Annotated[AuditService, Depends(get_audit_service)],
+    settings: SettingsDep,
+) -> AuthService:
+    return AuthService(repository, audit, settings)
+
+
 def get_analytics_service(
     machines: Annotated[MachineRepository, Depends(get_machine_repository)],
     production: Annotated[ProductionRepository, Depends(get_production_repository)],
@@ -188,3 +224,7 @@ AlertServiceDep = Annotated[AlertService, Depends(get_alert_service)]
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(get_analytics_service)]
 DashboardServiceDep = Annotated[DashboardService, Depends(get_dashboard_service)]
 MaintenanceServiceDep = Annotated[MaintenanceService, Depends(get_maintenance_service)]
+AuditServiceDep = Annotated[AuditService, Depends(get_audit_service)]
+AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+RevocationStoreDep = Annotated[TokenRevocationStore, Depends(get_revocation_store)]
+UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]

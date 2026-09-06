@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from app.dependencies import (
     get_alert_service,
     get_analytics_service,
+    get_audit_service,
     get_dashboard_service,
     get_inventory_service,
     get_machine_service,
@@ -28,6 +29,8 @@ from app.dependencies import (
     get_production_service,
     get_quality_service,
 )
+from app.models.enums import RoleCode
+from app.security.dependencies import get_current_user
 from tests import fakes
 from tests.fakes import XSS_PAYLOAD
 
@@ -47,7 +50,14 @@ INJECTION_PAYLOADS = [
 
 @pytest.fixture
 def services(app) -> dict[str, Any]:
-    """Install fake services and return them for assertion.
+    """Install fake services and an authenticated session.
+
+    Every business endpoint now requires a session, so without the auth
+    override these tests would all silently become tests of the 401 path.
+    `get_current_user` is replaced with an ADMIN user so each test keeps
+    exercising what it was written for -- pagination, envelopes, validation.
+    Authentication and authorization have their own suite, where the override is
+    exactly what is *not* used.
 
     Overrides are cleared afterwards so one test cannot leak into another.
     """
@@ -60,9 +70,15 @@ def services(app) -> dict[str, Any]:
         "maintenance": fakes.FakeMaintenanceService(),
         "analytics": fakes.FakeAnalyticsService(),
         "dashboard": fakes.FakeDashboardService(),
+        "audit": fakes.FakeAuditService(),
     }
     app.dependency_overrides.update(
         {
+            get_current_user: lambda: fakes.make_user(RoleCode.ADMIN),
+            # `require_permission` resolves the audit service so it can record a
+            # denial. In production that shares the request's existing
+            # connection; here there is no database, so it is faked too.
+            get_audit_service: lambda: fake["audit"],
             get_production_service: lambda: fake["production"],
             get_quality_service: lambda: fake["quality"],
             get_inventory_service: lambda: fake["inventory"],
@@ -74,6 +90,19 @@ def services(app) -> dict[str, Any]:
         }
     )
     yield fake
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def authenticated(app):
+    """Authenticate without replacing the service layer.
+
+    For the few tests that must reach the real dependency chain -- to observe
+    what happens when the database is absent, for instance.
+    """
+    app.dependency_overrides[get_current_user] = lambda: fakes.make_user(RoleCode.ADMIN)
+    app.dependency_overrides[get_audit_service] = lambda: fakes.FakeAuditService()
+    yield
     app.dependency_overrides.clear()
 
 
@@ -294,6 +323,9 @@ def test_every_documented_endpoint_responds(client: TestClient, services) -> Non
         "/maintenance",
         "/health",
         "/health/live",
+        "/auth/status",
+        "/auth/csrf",
+        "/auth/me",
     ]
 
     for endpoint in endpoints:
@@ -335,8 +367,11 @@ def test_a_validation_error_names_the_offending_field(client: TestClient, servic
     assert any("page" in key for key in details)
 
 
-def test_a_missing_database_returns_a_clean_503(client: TestClient) -> None:
-    """No service override here, so the request reaches the real (absent) pool.
+def test_a_missing_database_returns_a_clean_503(
+    client: TestClient,
+    authenticated,
+) -> None:
+    """An authenticated request that reaches the real (absent) pool.
 
     The point is that a missing database produces the error envelope with a
     generic message, not a psycopg traceback.
@@ -353,7 +388,10 @@ def test_a_missing_database_returns_a_clean_503(client: TestClient) -> None:
 
 
 @pytest.mark.security
-def test_no_error_response_leaks_internals(client: TestClient) -> None:
+def test_no_error_response_leaks_internals(
+    client: TestClient,
+    authenticated,
+) -> None:
     """Spec section 68: no stack trace, SQL, path or connection string."""
     responses = [
         client.get(f"{API}/production", params={"page_size": 9_999}),
@@ -616,6 +654,7 @@ def test_endpoints_are_grouped_into_the_expected_tags(app) -> None:
     tags = {tag["name"] for tag in spec["openapi"] and spec.get("tags", [])}
 
     assert tags == {
+        "Authentication",
         "Dashboard",
         "Production",
         "Quality",

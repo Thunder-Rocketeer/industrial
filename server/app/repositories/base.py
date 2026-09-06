@@ -190,6 +190,21 @@ class BaseRepository:
             return default
         return next(iter(row.values()))
 
+    async def execute(
+        self,
+        statement: sql.Composable | str,
+        params: list[Any] | tuple[Any, ...] | None = None,
+    ) -> int:
+        """Run a statement that returns no rows. Returns the affected row count.
+
+        Phase 3 was read-only, so this is the first write path. It exists here
+        rather than in the one repository that needs it so that every future
+        write goes through the same parameterised entry point as every read.
+        """
+        async with self._connection.cursor() as cursor:
+            await cursor.execute(statement, params)
+            return cursor.rowcount
+
     async def count(
         self,
         from_clause: sql.Composable | str,

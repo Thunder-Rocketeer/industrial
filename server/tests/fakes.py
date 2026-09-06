@@ -32,6 +32,7 @@ from app.models.enums import (
     MachineType,
     MaintenanceStatus,
     MaintenanceType,
+    RoleCode,
 )
 from app.schemas.alerts import Alert, AlertSeverityCount, AlertSummary
 from app.schemas.analytics import (
@@ -74,6 +75,7 @@ from app.schemas.quality import (
     QualityRecord,
     QualitySummary,
 )
+from app.services.auth_service import AuthenticatedUser
 
 #: `datetime.UTC` is Python 3.11+; this project targets 3.10.
 UTC = timezone.utc
@@ -94,6 +96,83 @@ NOW = datetime(2026, 9, 5, 6, 30, tzinfo=UTC)
 #: A string that would execute if any layer treated a value as markup or SQL.
 #: Used to prove the API returns it inert (spec section 14).
 XSS_PAYLOAD = "<script>alert('XSS')</script>"
+
+USER_ID = UUID("99999999-9999-4999-8999-999999999999")
+
+
+def make_user(role: RoleCode = RoleCode.ADMIN, **overrides: Any) -> AuthenticatedUser:
+    """Build an authenticated user for tests that need a session.
+
+    Defaults to ADMIN so a test about pagination is not also a test about
+    permissions. Tests that *are* about permissions pass the role explicitly.
+    """
+    labels = {
+        RoleCode.ADMIN: "Administrator",
+        RoleCode.FACTORY_MANAGER: "Factory Manager",
+        RoleCode.PRODUCTION_SUPERVISOR: "Production Supervisor",
+        RoleCode.QUALITY_ENGINEER: "Quality Engineer",
+        RoleCode.INVENTORY_MANAGER: "Inventory Manager",
+        RoleCode.VIEWER: "Viewer",
+    }
+    defaults: dict[str, Any] = {
+        "id": USER_ID,
+        "email": "tester@factory.local",
+        "name": "Test User",
+        "role": role,
+        "role_label": labels[role],
+        "avatar_url": None,
+        "is_active": True,
+        "last_login_at": NOW,
+    }
+    return AuthenticatedUser(**{**defaults, **overrides})
+
+
+class FakeRevocationStore:
+    """In-memory stand-in for the Redis revocation denylist."""
+
+    def __init__(self) -> None:
+        self.revoked: set[str] = set()
+
+    async def revoke(self, token_id: str, ttl_seconds: int) -> bool:
+        self.revoked.add(token_id)
+        return True
+
+    async def is_revoked(self, token_id: str) -> bool:
+        return token_id in self.revoked
+
+
+class FakeAuditService:
+    """Records audit calls in memory so tests can assert on them."""
+
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    async def record(self, **kwargs: Any) -> None:
+        self.events.append(kwargs)
+
+    async def login_initiated(self, **kwargs: Any) -> None:
+        self.events.append({"action": "AUTH.LOGIN_INITIATED", **kwargs})
+
+    async def login_success(self, **kwargs: Any) -> None:
+        self.events.append({"action": "AUTH.LOGIN_SUCCESS", **kwargs})
+
+    async def login_failure(self, **kwargs: Any) -> None:
+        self.events.append({"action": "AUTH.LOGIN_FAILURE", **kwargs})
+
+    async def login_denied(self, **kwargs: Any) -> None:
+        self.events.append({"action": "AUTH.LOGIN_DENIED", **kwargs})
+
+    async def logout(self, **kwargs: Any) -> None:
+        self.events.append({"action": "AUTH.LOGOUT", **kwargs})
+
+    async def unauthorized(self, **kwargs: Any) -> None:
+        self.events.append({"action": "AUTH.UNAUTHORIZED_ACCESS", **kwargs})
+
+    async def forbidden(self, **kwargs: Any) -> None:
+        self.events.append({"action": "AUTH.FORBIDDEN_ACCESS", **kwargs})
+
+    def actions(self) -> list[str]:
+        return [event.get("action", "") for event in self.events]
 
 
 class FakeDatabasePool:

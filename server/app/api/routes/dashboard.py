@@ -4,15 +4,24 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.api.routes.production import COMMON_ERRORS
 from app.dependencies import DashboardServiceDep
 from app.schemas.common import Envelope
 from app.schemas.dashboard import DashboardSummary, DashboardTrends
 from app.schemas.filters import TrendFilters
+from app.security.dependencies import require_permission
+from app.security.policy import Permission
 
-router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+#: Every endpoint on this router requires DASHBOARD_READ. Declared once at
+#: the router rather than per route, so an endpoint added later inherits
+#: the protection instead of being unguarded until someone notices.
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["Dashboard"],
+    dependencies=[Depends(require_permission(Permission.DASHBOARD_READ))],
+)
 
 
 @router.get(

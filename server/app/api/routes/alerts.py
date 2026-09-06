@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.api.routes.production import COMMON_ERRORS
 from app.dependencies import AlertServiceDep, MaintenanceServiceDep
@@ -17,9 +17,19 @@ from app.schemas.alerts import Alert, AlertSummary
 from app.schemas.common import Envelope, PaginatedResponse, PaginationMeta
 from app.schemas.filters import AlertFilters, MaintenanceFilters
 from app.schemas.machines import MaintenanceRecord
+from app.security.dependencies import require_permission
+from app.security.policy import Permission
 
-alerts_router = APIRouter(prefix="/alerts", tags=["Alerts"])
-maintenance_router = APIRouter(prefix="/maintenance", tags=["Maintenance"])
+alerts_router = APIRouter(
+    prefix="/alerts",
+    tags=["Alerts"],
+    dependencies=[Depends(require_permission(Permission.ALERTS_READ))],
+)
+maintenance_router = APIRouter(
+    prefix="/maintenance",
+    tags=["Maintenance"],
+    dependencies=[Depends(require_permission(Permission.MAINTENANCE_READ))],
+)
 
 
 @alerts_router.get(

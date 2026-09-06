@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.api.routes.production import COMMON_ERRORS
 from app.dependencies import AnalyticsServiceDep
@@ -23,8 +23,17 @@ from app.schemas.analytics import (
 )
 from app.schemas.common import Envelope
 from app.schemas.filters import AnalyticsFilters
+from app.security.dependencies import require_permission
+from app.security.policy import Permission
 
-router = APIRouter(prefix="/analytics", tags=["Analytics"])
+#: Every endpoint on this router requires ANALYTICS_READ. Declared once at
+#: the router rather than per route, so an endpoint added later inherits
+#: the protection instead of being unguarded until someone notices.
+router = APIRouter(
+    prefix="/analytics",
+    tags=["Analytics"],
+    dependencies=[Depends(require_permission(Permission.ANALYTICS_READ))],
+)
 
 
 @router.get(

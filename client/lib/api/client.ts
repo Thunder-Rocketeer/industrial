@@ -55,10 +55,61 @@ export const apiClient: AxiosInstance = axios.create({
 
 apiClient.interceptors.request.use(attachRequestMetadata);
 
+/**
+ * Callbacks invoked once when the session is found to have ended.
+ *
+ * Registered by the auth layer rather than imported here, so this module stays
+ * free of React and of any particular router.
+ */
+type SessionExpiredHandler = () => void;
+const sessionExpiredHandlers = new Set<SessionExpiredHandler>();
+
+/** Register a callback for session expiry. Returns an unsubscribe function. */
+export function onSessionExpired(handler: SessionExpiredHandler): () => void {
+  sessionExpiredHandlers.add(handler);
+  return () => sessionExpiredHandlers.delete(handler);
+}
+
+/**
+ * Guards against a burst of notifications.
+ *
+ * A dashboard makes several concurrent requests. When a session expires they
+ * all return 401 at once, and without this every one would trigger a redirect
+ * (spec section 27: "avoid an infinite redirect loop"). The first notification
+ * wins; the rest are suppressed until the window passes.
+ */
+let lastSessionExpiryNotice = 0;
+const SESSION_EXPIRY_NOTICE_INTERVAL_MS = 5_000;
+
+function notifySessionExpired(): void {
+  const now = Date.now();
+  if (now - lastSessionExpiryNotice < SESSION_EXPIRY_NOTICE_INTERVAL_MS) {
+    return;
+  }
+  lastSessionExpiryNotice = now;
+  for (const handler of sessionExpiredHandlers) {
+    handler();
+  }
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
-  // Reject with a normalized ApiError so no raw AxiosError escapes this module.
-  (error: unknown) => Promise.reject(normalizeError(error)),
+  (error: unknown) => {
+    const normalized = normalizeError(error);
+
+    // A 401 on the session-check endpoint is the *expected* answer for an
+    // anonymous visitor. Treating it as an expiry would make every signed-out
+    // page load announce that a session had ended.
+    const url = (error as { config?: { url?: string } })?.config?.url ?? "";
+    const isSessionProbe = url.includes("/auth/me") || url.includes("/auth/status");
+
+    if (normalized.isAuthError && !isSessionProbe) {
+      notifySessionExpired();
+    }
+
+    // Reject with a normalized ApiError so no raw AxiosError escapes this module.
+    return Promise.reject(normalized);
+  },
 );
 
 /**

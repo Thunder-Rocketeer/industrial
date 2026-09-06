@@ -146,20 +146,48 @@ RBAC, CSRF, and Content-Security-Policy.
 
 ---
 
-## Phase 4 — Authentication and frontend foundation
+## Phase 4 — Authentication and authorization ✅ complete
 
-- Authenticated application shell: sidebar, header, content region, toasts.
-- Login page and route protection. Note that Next.js 16 renames middleware to
-  **`proxy.ts`**; optimistic redirects belong there, authoritative checks stay
-  on the backend.
-- Theme and styling foundations: the status colour system, spacing and
-  typography scales, and the accessible status components required by spec
-  section 45 (state is never conveyed by colour alone).
-- Typed API modules under `lib/api/` built on the existing Axios client.
-- Data-fetching hooks in `hooks/`, using the query-key registry.
+Google OAuth 2.0 / OIDC, JWT sessions, RBAC and the frontend auth foundation.
 
-**Acceptance:** navigation works by keyboard, focus is always visible, the shell
-is usable at mobile, tablet and desktop widths.
+**Delivered**
+
+- Migration 009: generalised the identity to `(provider, provider_subject)` and
+  added `avatar_url`.
+- `security/oauth.py` — Authlib Google client with discovery, PKCE, `state` and
+  `nonce`. No protocol step is reimplemented.
+- `security/jwt.py` — issuing and validation with an explicit algorithm list, so
+  `alg: none` and algorithm confusion are structurally impossible.
+- `security/policy.py` — 17 permissions across 6 roles, in one matrix.
+- `security/dependencies.py` — the full request flow; the only place a JWT is
+  parsed.
+- `security/revocation.py`, `cookies.py`, `csrf.py`, `redirects.py`.
+- `services/auth_service.py` — provisioning policy and account restriction.
+- `services/audit_service.py` — 10 authentication events, with redaction applied
+  centrally.
+- 6 auth endpoints; every business router gated by a permission.
+- Frontend: auth provider, login page, `RequireAuth`, `proxy.ts`, centralized
+  401 handling.
+- `docs/authentication.md`.
+
+**Acceptance**
+
+| Check | Result |
+|---|---|
+| `ruff check` / `ruff format --check` | clean |
+| `pytest` | 466 passed, 25 skipped |
+| Frontend lint / typecheck / build | pass |
+| `alg: none`, wrong key, tampered payload, wrong `iss`/`aud`, expired, missing claim | all rejected |
+| 12 open-redirect payloads | all rejected |
+| Every business endpoint requires a session | verified |
+| Role without permission gets 403, with permission passes | verified |
+| Inactive user rejected with a valid token | verified |
+| Revoked token rejected | verified |
+| Real Google authorization redirect (state, nonce, PKCE S256) | verified |
+
+**Not verified:** a complete interactive sign-in. It needs a browser, a live
+database and a Google account whose address the deployment admits. Everything up
+to the redirect to Google is verified against real Google infrastructure.
 
 ---
 

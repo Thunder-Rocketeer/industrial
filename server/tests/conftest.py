@@ -29,6 +29,13 @@ os.environ.setdefault("CACHE_ENABLED", "false")
 os.environ.setdefault("DATABASE_URL", "")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "true")
 
+# Google credentials are cleared rather than defaulted: `setdefault` would leave
+# a developer's real .env values in place, and the tests assert on whether OAuth
+# reports itself configured. Overridden outright so the result does not depend
+# on whose machine the suite runs on.
+os.environ["GOOGLE_CLIENT_ID"] = ""
+os.environ["GOOGLE_CLIENT_SECRET"] = ""
+
 from app.config import Settings, get_settings
 from app.main import create_app
 

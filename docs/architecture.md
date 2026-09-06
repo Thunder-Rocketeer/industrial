@@ -1,6 +1,6 @@
 # Architecture
 
-Decisions taken during Phases 1 to 3, and the reasoning behind them. This
+Decisions taken during Phases 1 to 4, and the reasoning behind them. This
 document records *why* the system looks the way it does; the README covers *how*
 to run it, and [`database.md`](./database.md) is the schema reference.
 
@@ -388,7 +388,88 @@ is what caught it.
 the connection dependency raises first. Worth knowing when reading a test
 failure, and harmless in production where the database is up.
 
-## 19. Typography
+## 19. Authentication shape, revisited
+
+Section 8 sketched this before it existed. What was built matches, and three
+decisions are worth recording with their costs.
+
+### 19.1 The session is a cookie, and the frontend knows nothing else
+
+There is no token in JavaScript, no decoded JWT in a store, nothing in
+`localStorage`. The frontend's entire notion of "am I signed in" is the answer to
+`GET /auth/me`.
+
+The cost is one request on load, and a state machine with a genuine `loading`
+state. The benefit is that the client cannot hold a stale or forged opinion about
+who it is, and that an injected script cannot exfiltrate a token to replay
+elsewhere. The `HttpOnly` flag is doing real work: XSS can still act as the user
+while the page is open, but it cannot take the session away with it.
+
+### 19.2 The role is in the token *and* the database, and the database wins
+
+The token carries a `role` claim, and every request loads the user anyway to
+check `is_active`. So the claim saves nothing.
+
+It is kept because it makes a token self-describing in a log, and because the
+authoritative read is already paid for. The consequence is the useful direction:
+a role change takes effect on the *next request*, not at token expiry.
+
+### 19.3 Revocation fails open, deliberately
+
+A denylist of revoked `jti` values lives in Redis. If Redis is down, the check
+cannot run, and there are exactly two options.
+
+Rejecting every request would mean a cache outage logs out every user of a
+dashboard that is otherwise able to serve them — converting a degraded
+dependency into a total outage, which is the failure Phase 3's whole design
+avoids. So a revoked token stays usable for at most its remaining lifetime,
+15 minutes by default, and the failure is logged loudly.
+
+This is the one place in the system where availability was chosen over security,
+and it is bounded by the token lifetime rather than open-ended. An application
+where immediate revocation is a hard requirement should carry a server-side
+session lookup and accept the per-request read.
+
+## 20. Where authorization actually lives
+
+Four layers claim to control access. Only one of them does.
+
+```
+proxy.ts          cookie present?          UX      -- cannot verify anything
+RequireAuth       session confirmed?       UX      -- client-side, editable
+permissions[]     hide a button            UX      -- advisory
+require_permission  backend, every request AUTHORITATIVE
+```
+
+The top three exist so a signed-out visitor does not see a flash of empty
+dashboard, and so a Viewer is not shown a button that would 403. Each can be
+defeated by anyone willing to edit their own browser, and defeating them yields
+an empty shell and a series of 401s.
+
+Stating the hierarchy explicitly matters because the failure mode is quiet: a
+frontend guard that looks like security invites someone to skip adding the
+backend check, and nothing visibly breaks until it is exploited.
+
+Two consequences shape the code. Routes declare a **permission**, never a role,
+so the matrix is a table rather than a scattering of role lists that drift.
+And protection is attached at the **router**, so an endpoint added later inherits
+it instead of being unguarded until someone notices.
+
+## 21. Two things the specification asked for that were deliberately not built
+
+**Content-Security-Policy.** Spec section 17 asks for the headers to be reviewed
+and says a CSP must be designed against real frontend requirements. Those
+requirements do not exist yet — the dashboard is Phase 5. A policy written now
+would be a guess, and a guessed CSP has a predictable life: it breaks something,
+someone adds `unsafe-inline`, and it protects nothing while appearing to. It is
+deferred with the reason recorded rather than filled in.
+
+**HSTS.** It belongs at the TLS-terminating proxy, which knows whether the
+connection is HTTPS. Emitting it from an application served over `http://`
+localhost would pin the developer's browser to HTTPS for a host that does not
+serve it — a self-inflicted outage, and a confusing one.
+
+## 22. Typography
 
 `next/font/google` downloads font files at build time. That makes the build
 depend on reaching `fonts.gstatic.com`, which fails on offline and

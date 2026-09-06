@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.routes.production import COMMON_ERRORS
 from app.dependencies import InventoryServiceDep
@@ -18,8 +18,17 @@ from app.schemas.inventory import (
     InventoryTransaction,
     InventoryTrendPoint,
 )
+from app.security.dependencies import require_permission
+from app.security.policy import Permission
 
-router = APIRouter(prefix="/inventory", tags=["Inventory"])
+#: Every endpoint on this router requires INVENTORY_READ. Declared once at
+#: the router rather than per route, so an endpoint added later inherits
+#: the protection instead of being unguarded until someone notices.
+router = APIRouter(
+    prefix="/inventory",
+    tags=["Inventory"],
+    dependencies=[Depends(require_permission(Permission.INVENTORY_READ))],
+)
 
 _NOT_FOUND = {404: {"description": "The requested inventory item does not exist."}}
 

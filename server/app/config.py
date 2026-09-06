@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, computed_field, field_validator
+from pydantic import AliasChoices, Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -109,15 +109,48 @@ class Settings(BaseSettings):
     cache_circuit_breaker_failures: int = Field(default=3, ge=1, le=100)
 
     # -- Security / JWT (spec section 55) -------------------------------------
-    secret_key: str = ""
+    # `JWT_SECRET_KEY` is accepted as an alias so either name works in .env.
+    secret_key: str = Field(
+        default="", validation_alias=AliasChoices("SECRET_KEY", "JWT_SECRET_KEY")
+    )
     jwt_algorithm: str = "HS256"
     jwt_issuer: str = "acf-dashboard"
     jwt_audience: str = "acf-dashboard-api"
-    access_token_expire_minutes: int = Field(default=15, ge=1, le=60)
+    # `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` is accepted as an alias. The upper bound
+    # is a hard limit, not a default: a token that cannot be un-issued should
+    # not outlive the attention span of an incident (spec section 55.3).
+    access_token_expire_minutes: int = Field(
+        default=15,
+        ge=1,
+        le=60,
+        validation_alias=AliasChoices(
+            "ACCESS_TOKEN_EXPIRE_MINUTES", "JWT_ACCESS_TOKEN_EXPIRE_MINUTES"
+        ),
+    )
     refresh_token_expire_days: int = Field(default=7, ge=1, le=90)
+
+    # -- Cookies (spec sections 7 and 55.4) -----------------------------------
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
     cookie_domain: str = ""
+    session_cookie_name: str = "acf_session"
+    csrf_cookie_name: str = "acf_csrf"
+    #: Cookie carrying the in-flight OAuth transaction (state and nonce). Scoped
+    #: to the auth path so it is not sent with every API request.
+    oauth_cookie_name: str = "acf_oauth"
+    #: An OAuth round trip through Google should take seconds. A short life
+    #: bounds how long a captured state value is worth anything.
+    oauth_transaction_max_age_seconds: int = Field(default=600, ge=60, le=3600)
+
+    # -- Account restriction (spec section 28) ---------------------------------
+    #: Empty means "any Google account". Both lists are enforced server-side
+    #: after the identity has been cryptographically verified.
+    auth_allowed_email_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    auth_allowed_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    #: When false, only users already present in the database may sign in.
+    auth_auto_provision: bool = True
+    #: Role given to an auto-provisioned user. Never taken from the request.
+    auth_default_role: str = "VIEWER"
 
     # -- Google OAuth 2.0 / OIDC (spec section 54.2) --------------------------
     google_client_id: str = ""
@@ -167,6 +200,38 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("auth_allowed_email_domains", "auth_allowed_emails", mode="before")
+    @classmethod
+    def _split_auth_lists(cls, value: object) -> object:
+        """Accept a comma-separated string, and normalise to lowercase.
+
+        Email comparison must be case-insensitive: Google returns the address in
+        whatever case the user typed, and `Admin@Factory.com` and
+        `admin@factory.com` are the same mailbox. Normalising here means the
+        comparison at sign-in is a plain equality check.
+        """
+        if isinstance(value, str):
+            return [item.strip().lower() for item in value.split(",") if item.strip()]
+        if isinstance(value, list):
+            return [str(item).strip().lower() for item in value if str(item).strip()]
+        return value
+
+    @field_validator("auth_default_role")
+    @classmethod
+    def _validate_default_role(cls, value: str) -> str:
+        """The default role must be a real role code.
+
+        Checked here so a typo fails at startup rather than at the first
+        sign-in, which would leave a user provisioned with no role at all.
+        """
+        from app.models.enums import RoleCode
+
+        allowed = {role.value for role in RoleCode}
+        upper = value.strip().upper()
+        if upper not in allowed:
+            raise ValueError(f"AUTH_DEFAULT_ROLE must be one of {sorted(allowed)}, got {value!r}.")
+        return upper
+
     @field_validator("api_v1_prefix")
     @classmethod
     def _normalize_prefix(cls, value: str) -> str:
@@ -205,6 +270,70 @@ class Settings(BaseSettings):
         if upper not in allowed:
             raise ValueError(f"LOG_LEVEL must be one of {sorted(allowed)}")
         return upper
+
+    @model_validator(mode="after")
+    def _fail_closed_in_production(self) -> Settings:
+        """Refuse to start with an insecure production configuration.
+
+        Spec section 34: "Do not create a configuration that accidentally
+        disables critical security controls in production. Fail closed on
+        insecure production authentication configuration."
+
+        Every check below describes a setting that is correct for local
+        development and dangerous in production. Defaulting them the safe way
+        would break local development; warning about them would be ignored. So
+        they are permitted, and the environment decides whether they are fatal.
+
+        Development is deliberately unaffected: `http://localhost` and a
+        non-Secure cookie are exactly what a developer needs.
+        """
+        if self.app_env is not Environment.PRODUCTION:
+            return self
+
+        problems: list[str] = []
+
+        if not self.secret_key or len(self.secret_key) < 32:
+            problems.append(
+                "SECRET_KEY must be set and at least 32 characters. Generate one with: "
+                'python -c "import secrets; print(secrets.token_urlsafe(64))"'
+            )
+        if not self.cookie_secure:
+            problems.append(
+                "COOKIE_SECURE must be true in production, or the session cookie "
+                "travels over plain HTTP."
+            )
+        if self.debug:
+            problems.append("DEBUG must be false in production.")
+
+        # An http:// redirect URI in production means the authorization code
+        # comes back over a channel anyone on the path can read.
+        insecure_urls = {
+            "GOOGLE_REDIRECT_URI": self.google_redirect_uri,
+            "FRONTEND_LOGIN_SUCCESS_URL": self.frontend_login_success_url,
+            "FRONTEND_LOGIN_FAILURE_URL": self.frontend_login_failure_url,
+        }
+        for name, url in insecure_urls.items():
+            if url and url.startswith("http://"):
+                problems.append(f"{name} must use https in production, got {url!r}.")
+
+        for origin in self.cors_allowed_origins:
+            if origin.startswith("http://") and "localhost" not in origin:
+                problems.append(f"CORS origin {origin!r} must use https in production.")
+
+        # SameSite=None requires Secure, and is only correct for a genuinely
+        # cross-site frontend. Reaching for it to "fix" a cookie problem is how
+        # CSRF protection gets removed by accident.
+        if self.cookie_samesite == "none" and not self.cookie_secure:
+            problems.append("COOKIE_SAMESITE=none requires COOKIE_SECURE=true.")
+
+        if problems:
+            bullet = chr(10) + "  - "
+            raise ValueError(
+                "Insecure production configuration; refusing to start."
+                + bullet
+                + bullet.join(problems)
+            )
+        return self
 
     # -- Derived --------------------------------------------------------------
 

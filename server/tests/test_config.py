@@ -7,6 +7,21 @@ from pydantic import ValidationError
 
 from app.config import Settings
 
+#: A production configuration that satisfies the fail-closed checks in
+#: `Settings`. Used by tests that need `APP_ENV=production` for some *other*
+#: reason -- without it they now fail on the security validation, which is the
+#: validator working rather than a test problem.
+SECURE_PRODUCTION = {
+    "app_env": "production",
+    "secret_key": "t" * 64,
+    "cookie_secure": True,
+    "debug": False,
+    "google_redirect_uri": "https://api.example.com/api/v1/auth/google/callback",
+    "frontend_login_success_url": "https://app.example.com/dashboard",
+    "frontend_login_failure_url": "https://app.example.com/login",
+    "cors_allowed_origins": ["https://app.example.com"],
+}
+
 
 def test_wildcard_cors_origin_is_rejected() -> None:
     """Spec section 61: '*' is invalid because requests carry credentials."""
@@ -45,7 +60,7 @@ def test_access_token_lifetime_is_bounded() -> None:
 
 def test_docs_are_disabled_in_production() -> None:
     """Spec section 40: OpenAPI docs are a development affordance."""
-    production = Settings(app_env="production", _env_file=None)
+    production = Settings(**SECURE_PRODUCTION, _env_file=None)
 
     assert production.is_production is True
     assert production.docs_url is None

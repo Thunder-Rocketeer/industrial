@@ -8,17 +8,18 @@ Built to the specification in
 [`automobile_component_factory_claude_code_spec_v2.md`](./automobile_component_factory_claude_code_spec_v2.md),
 which is the authoritative document for this project.
 
-> **Status: Phases 1–3 complete.**
-> Repository structure, the Supabase schema and deterministic seed, and the full
-> backend API — repositories, services, KPI calculations, Redis caching and 37
-> endpoints — are implemented and tested. Authentication and the dashboard UI
-> are Phases 4–10.
+> **Status: Phases 1–4 complete.**
+> Repository structure, the Supabase schema and deterministic seed, the backend
+> API (repositories, services, KPI calculations, Redis caching, 44 endpoints),
+> and authentication — Google OAuth 2.0 / OIDC, JWT sessions, RBAC and the
+> frontend auth foundation. The dashboard UI is Phase 5 onward.
 >
 > The schema and seed have **not yet been executed against a live Supabase
 > project** (no database was reachable from the development machine). See
 > [Applying the schema](#supabase-setup).
 >
 > Reference: [`docs/api.md`](./docs/api.md) ·
+> [`docs/authentication.md`](./docs/authentication.md) ·
 > [`docs/database.md`](./docs/database.md) ·
 > [`docs/architecture.md`](./docs/architecture.md) ·
 > [`docs/implementation-plan.md`](./docs/implementation-plan.md)
@@ -73,7 +74,8 @@ IR_Project/
 │   │   └── utils/
 │   ├── hooks/                  data-fetching hooks
 │   ├── types/                  API contract types
-│   └── providers/              client-side React providers
+│   ├── providers/              query, auth and session-expiry providers
+│   └── proxy.ts                Next.js 16 route protection (not middleware.ts)
 │
 ├── server/                     FastAPI + Python 3.10
 │   ├── app/
@@ -87,7 +89,7 @@ IR_Project/
 │   │   ├── models/             domain entities and enums
 │   │   ├── db/                 pool, connections, seed and verify commands
 │   │   ├── cache/              Redis client, keys, serializer, service
-│   │   ├── security/           rate limiting (OAuth/JWT in Phase 4)
+│   │   ├── security/           OAuth/OIDC, JWT, RBAC, CSRF, rate limiting
 │   │   └── utils/              logging and cross-cutting helpers
 │   ├── tools/                  SQL validation, schema builder
 │   └── tests/
@@ -150,7 +152,8 @@ Grouped by concern; see `server/.env.example` for the full annotated list.
 | CORS | `CORS_ALLOWED_ORIGINS` (comma-separated; a wildcard is rejected) |
 | Supabase | `SUPABASE_URL` `SUPABASE_ANON_KEY` `SUPABASE_SERVICE_ROLE_KEY` `DATABASE_URL` |
 | Redis | `REDIS_URL` `CACHE_TTL_DASHBOARD` `CACHE_TTL_TRENDS` `CACHE_TTL_ANALYTICS` `CACHE_TTL_REFERENCE` |
-| Security | `SECRET_KEY` `JWT_ALGORITHM` `JWT_ISSUER` `JWT_AUDIENCE` `ACCESS_TOKEN_EXPIRE_MINUTES` `REFRESH_TOKEN_EXPIRE_DAYS` `COOKIE_SECURE` `COOKIE_SAMESITE` `COOKIE_DOMAIN` |
+| Security | `SECRET_KEY` `JWT_ALGORITHM` `JWT_ISSUER` `JWT_AUDIENCE` `ACCESS_TOKEN_EXPIRE_MINUTES` `COOKIE_SECURE` `COOKIE_SAMESITE` `COOKIE_DOMAIN` `SESSION_COOKIE_NAME` `CSRF_COOKIE_NAME` |
+| Auth policy | `AUTH_ALLOWED_EMAIL_DOMAINS` `AUTH_ALLOWED_EMAILS` `AUTH_AUTO_PROVISION` `AUTH_DEFAULT_ROLE` |
 | Google OAuth | `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `GOOGLE_REDIRECT_URI` `GOOGLE_OIDC_ISSUER` `FRONTEND_LOGIN_SUCCESS_URL` `FRONTEND_LOGIN_FAILURE_URL` |
 | Rate limiting | `RATE_LIMIT_ENABLED` `RATE_LIMIT_OAUTH` `RATE_LIMIT_AUTHENTICATED` `RATE_LIMIT_ANALYTICS` `RATE_LIMIT_UNAUTHENTICATED` |
 | Seed | `SEED_RANDOM_SEED` `SEED_HISTORY_DAYS` |
@@ -185,6 +188,31 @@ The migrations in `supabase/migrations/` are the source of truth;
 `supabase/schema.sql` is generated from them by `python tools/build_schema.py`.
 
 Full reference: [`docs/database.md`](./docs/database.md).
+
+## Authentication setup
+
+Sign-in is Google OAuth 2.0 / OpenID Connect. Without credentials the API still
+runs — only the login endpoints report themselves unavailable.
+
+1. Create an OAuth client in the [Google Cloud console](https://console.cloud.google.com/)
+   (**APIs & Services → Credentials → OAuth client ID → Web application**).
+2. Authorised redirect URI, matching `GOOGLE_REDIRECT_URI` exactly:
+
+   ```
+   http://localhost:8000/api/v1/auth/google/callback
+   ```
+
+3. Put the client ID and secret in `server/.env`, and generate a signing key:
+
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(64))"
+   ```
+
+Full walkthrough, the permission matrix and the security decisions:
+[`docs/authentication.md`](./docs/authentication.md).
+
+> The **Google client secret is backend-only**. It must never appear in
+> `client/` or in any `NEXT_PUBLIC_*` variable. The browser never needs it.
 
 ## Redis setup
 
@@ -298,7 +326,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 
 ## API
 
-37 endpoints under `/api/v1`, documented interactively at
+44 endpoints under `/api/v1`, documented interactively at
 <http://localhost:8000/docs> and in full in [`docs/api.md`](./docs/api.md).
 
 ```
@@ -314,7 +342,13 @@ pip install -r requirements.txt -r requirements-dev.txt
 /alerts                   + /active /summary
 /maintenance
 /health  /health/live  /health/ready
+/auth/google/login  /auth/google/callback  /auth/logout  /auth/me
+/auth/status  /auth/csrf
 ```
+
+**Every business endpoint requires a session.** Public: the health probes,
+`/auth/status` and `/auth/csrf`. See
+[`docs/authentication.md`](./docs/authentication.md).
 
 Responses use three envelopes and nothing else:
 
@@ -343,7 +377,7 @@ cd server && pytest
 cd client && npm run lint && npm run typecheck && npm run build
 ```
 
-**337 tests, no external services required.** API tests override the service
+**466 tests, no external services required.** API tests override the service
 dependencies with fakes, the cache tests use an in-memory Redis stand-in that
 can be told to fail, and the SQL is validated by parsing it with the real
 PostgreSQL grammar (`pglast`).
@@ -403,7 +437,8 @@ Browser  ->  Next.js  ->  FastAPI / Gunicorn  ->  Redis + Supabase
 | Typography | A system font stack rather than `next/font/google`. Google Fonts are downloaded at build time, which breaks builds on offline or network-restricted machines and adds an external dependency for no gain in a dense data UI. To use a bespoke typeface, self-host the woff2 files with `next/font/local`. |
 | Python version | 3.10, so `enum.StrEnum` and `datetime.UTC` (both 3.11+) are avoided. |
 | `passlib` + `bcrypt` | `passlib 1.7.4` reads `bcrypt.__about__.__version__`, which `bcrypt 5.x` no longer exposes, producing a warning on first use. Authentication is Google OAuth/OIDC per spec section 54, so no password hashing is expected; if a local password path is ever added, replace `passlib` with the `bcrypt` library directly. |
-| Content Security Policy | Deferred to the security phase. A CSP must be written against the application's real script and style sources; a placeholder policy would give false assurance. |
+| Content Security Policy | Still deferred. A CSP must be written against the frontend's real script and style sources, which are not settled until the dashboard exists; a placeholder would give false assurance and is usually loosened the first time it breaks something. HSTS belongs at the TLS proxy. |
+| Demo accounts cannot sign in as seeded | `.local` is a reserved TLD, so Google can never authenticate `admin@factory.local`. Re-seed with a domain you control, or promote your own account in the database. |
 
 ## Specification cross-reference
 
