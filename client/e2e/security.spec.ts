@@ -5,7 +5,7 @@
  * likes; a browser applies SameSite, origin rules and the same-origin policy on
  * its own, so what passes here is what a real attacker's page would face.
  */
-import { expect, sessions, signIn, test, waitForData } from "./fixtures";
+import { expect, sessions, signIn, signInDisposable, test, waitForData } from "./fixtures";
 
 const API = () => sessions().apiBaseUrl;
 
@@ -273,7 +273,9 @@ test.describe("CSRF", () => {
   });
 
   test("a wrong token is refused and the correct one succeeds", async ({ page }) => {
-    await signIn(page, "ADMIN");
+    // The success path here is a real sign-out, which revokes the token. It
+    // gets its own session so the rest of the suite keeps the shared one.
+    await signInDisposable(page, "ADMIN");
     await page.goto("/dashboard");
     await waitForData(page);
 
@@ -430,14 +432,33 @@ test.describe("rate limiting", () => {
 
       // Drive the first user into the limit. The cap is a safety net: the
       // point is that the limiter engages, not how long it takes.
+      /*
+       * Sent in batches rather than one at a time.
+       *
+       * Sequentially this took most of a minute and eventually tripped the test
+       * timeout on a slower backend -- and the fix for that is not a longer
+       * timeout, it is to stop testing a rate limiter with traffic no rate
+       * limiter would ever need to stop. Concurrent bursts are what the control
+       * exists for, and they reach the limit in a couple of seconds.
+       *
+       * The window is fixed rather than sliding, so a burst that straddles a
+       * boundary gets a fresh allowance; the cap below is generous enough to
+       * cross one and still finish.
+       */
       let sawLimit = false;
-      for (let i = 0; i < 400; i += 1) {
-        const status = (await heavyPage.request.get(`${API()}/alerts/summary`)).status();
-        if (status === 429) {
-          sawLimit = true;
-          break;
+      for (let batch = 0; batch < 20 && !sawLimit; batch += 1) {
+        const statuses = await Promise.all(
+          Array.from({ length: 25 }, () =>
+            heavyPage.request.get(`${API()}/alerts/summary`).then((response) => response.status()),
+          ),
+        );
+        for (const status of statuses) {
+          if (status === 429) {
+            sawLimit = true;
+          } else {
+            expect(status, "unexpected status while filling the bucket").toBe(200);
+          }
         }
-        expect(status, "unexpected status while filling the bucket").toBe(200);
       }
       expect(sawLimit, "the rate limiter never engaged, so this proves nothing").toBe(true);
 

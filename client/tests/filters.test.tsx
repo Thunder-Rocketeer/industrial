@@ -18,17 +18,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DateRangeFilter, FilterBar, SelectFilter } from "@/components/filters/Filters";
 
-const replace = vi.fn();
+const push = vi.fn();
 let currentSearch = "";
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace, push: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/production",
   useSearchParams: () => new URLSearchParams(currentSearch),
 }));
 
 beforeEach(() => {
-  replace.mockClear();
+  push.mockClear();
   currentSearch = "";
 });
 
@@ -72,8 +72,17 @@ describe("useUrlFilters", () => {
     const { result } = renderHook(() => useUrlFilters(KEYS));
     result.current.setFilter("machine_id", "m1");
 
-    // `replace`, not `push`: adjusting a filter should not stack history.
-    expect(replace).toHaveBeenCalledWith("/production?machine_id=m1", { scroll: false });
+    /*
+     * `push`, not `replace`.
+     *
+     * This asserted `replace` on the reasoning that adjusting a filter should
+     * not stack history. In a real browser that reasoning was wrong: with
+     * `replace` the filter change left no history entry, so Back took the user
+     * off the page entirely instead of undoing the filter they had just
+     * applied. Spec section 28 wants back and forward to move through filter
+     * state, and `pages.spec.ts` now drives that in Chromium.
+     */
+    expect(push).toHaveBeenCalledWith("/production?machine_id=m1", { scroll: false });
   });
 
   it("removes the key when a filter is cleared", () => {
@@ -82,15 +91,15 @@ describe("useUrlFilters", () => {
     result.current.setFilter("machine_id", undefined);
 
     // `?machine_id=` would be a 422 against a UUID field.
-    expect(replace).toHaveBeenCalledWith("/production?start_date=2026-01-01", { scroll: false });
+    expect(push).toHaveBeenCalledWith("/production?start_date=2026-01-01", { scroll: false });
   });
 
   it("sets several keys in one navigation", () => {
     const { result } = renderHook(() => useUrlFilters(KEYS));
     result.current.setFilters({ start_date: "2026-01-01", end_date: "2026-01-31" });
 
-    expect(replace).toHaveBeenCalledTimes(1);
-    const [url] = replace.mock.calls[0];
+    expect(push).toHaveBeenCalledTimes(1);
+    const [url] = push.mock.calls[0];
     expect(url).toContain("start_date=2026-01-01");
     expect(url).toContain("end_date=2026-01-31");
   });
@@ -100,7 +109,7 @@ describe("useUrlFilters", () => {
     // @ts-expect-error -- deliberately passing a key the page does not own.
     result.current.setFilter("role", "admin");
 
-    expect(replace).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("resets only its own keys", () => {
@@ -109,7 +118,7 @@ describe("useUrlFilters", () => {
     result.current.reset();
 
     // `tab` belongs to something else and is left alone.
-    expect(replace).toHaveBeenCalledWith("/production?tab=summary", { scroll: false });
+    expect(push).toHaveBeenCalledWith("/production?tab=summary", { scroll: false });
   });
 
   it("counts active filters for the Clear control", () => {

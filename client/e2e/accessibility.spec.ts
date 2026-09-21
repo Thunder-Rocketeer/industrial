@@ -105,7 +105,9 @@ test.describe("keyboard navigation", () => {
         const style = getComputedStyle(element);
         return {
           tag: element.tagName.toLowerCase(),
-          label: (element.getAttribute("aria-label") ?? element.textContent ?? "").trim().slice(0, 40),
+          label: (element.getAttribute("aria-label") ?? element.textContent ?? "")
+            .trim()
+            .slice(0, 40),
           outlineStyle: style.outlineStyle,
           outlineWidth: style.outlineWidth,
         };
@@ -195,7 +197,10 @@ test.describe("semantics", () => {
         ),
       );
 
-      expect(levels.filter((level) => level === 1), `${route} h1 count`).toHaveLength(1);
+      expect(
+        levels.filter((level) => level === 1),
+        `${route} h1 count`,
+      ).toHaveLength(1);
       expect(levels[0], `${route} does not start at h1`).toBe(1);
       for (let index = 1; index < levels.length; index += 1) {
         expect(

@@ -19,7 +19,7 @@
  * a 403 comes from signing in as a role that genuinely lacks the permission,
  * and a 404 from asking for a machine that genuinely does not exist.
  */
-import type { Page } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 
 import { expect, sessions, signIn, test, waitForData } from "./fixtures";
 
@@ -89,9 +89,29 @@ test.describe("HTTP failures are explained, not leaked", () => {
     await page.goto("/dashboard");
     await expect(page.getByRole("alert").first()).toBeVisible({ timeout: 20_000 });
 
+    /*
+     * The status-code and stack checks read the error regions, not the whole
+     * page, and that is the difference between the requirement and a
+     * coincidence rather than a weakening.
+     *
+     * "500" is an ordinary number on a factory dashboard: a shift target, a
+     * produced count, a planned quantity. Scanning all of `main` for it
+     * therefore failed on one run in three, on real seeded data. What must
+     * never leak is the *error* telling the user its HTTP status, so that is
+     * what gets read -- and the pattern is widened to any 4xx/5xx while it is
+     * scoped somewhere it cannot collide with the factory's own figures.
+     *
+     * The two strings below cannot occur innocently anywhere, so they stay
+     * page-wide.
+     */
+    const alerts = await page.getByRole("alert").allInnerTexts();
+    expect(alerts.length, "expected at least one error to inspect").toBeGreaterThan(0);
+    for (const alert of alerts) {
+      expect(alert, "a raw status code reached the screen").not.toMatch(/\b[45]\d\d\b/);
+      expect(alert, "a stack trace reached the screen").not.toMatch(/at\s+\w+\s*\(|\.tsx?:\d+/);
+    }
+
     const text = await page.locator("main").innerText();
-    expect(text, "a raw status code reached the screen").not.toMatch(/\b500\b/);
-    expect(text, "a stack trace reached the screen").not.toMatch(/at\s+\w+\s*\(|\.tsx?:\d+/);
     expect(text, "an internal URL reached the screen").not.toContain("localhost:8000");
     expect(text, "the raw error code reached the screen").not.toContain("INTERNAL_SERVER_ERROR");
   });
@@ -241,7 +261,7 @@ test.describe("transport failures", () => {
     await context.setOffline(true);
 
     const offlineRequests: string[] = [];
-    const record = (request: import("@playwright/test").Request) => {
+    const record = (request: Request) => {
       if (request.url().includes("/api/v1/")) offlineRequests.push(request.url());
     };
     page.on("request", record);

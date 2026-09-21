@@ -6,13 +6,17 @@
  * and asserts everything observable up to that point. It never pretends to have
  * signed in through Google.
  */
-import { expect, expectNoBrowserErrors, sessions, signIn, test } from "./fixtures";
+import {
+  expect,
+  expectNoBrowserErrors,
+  sessions,
+  signIn,
+  signInDisposable,
+  test,
+} from "./fixtures";
 
 test.describe("login page", () => {
-  test("renders the sign-in page with a working Google entry point", async ({
-    page,
-    problems,
-  }) => {
+  test("renders the sign-in page with a working Google entry point", async ({ page, problems }) => {
     await page.goto("/login");
 
     await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
@@ -166,7 +170,9 @@ test.describe("session behaviour", () => {
   });
 
   test("logging out clears the session and re-protects the dashboard", async ({ page }) => {
-    await signIn(page, "ADMIN");
+    // A disposable session, because signing out revokes the token for good and
+    // the shared ADMIN session is used by every other spec in the suite.
+    await signInDisposable(page, "ADMIN");
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Factory Operations");
 

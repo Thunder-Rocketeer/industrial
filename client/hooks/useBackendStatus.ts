@@ -19,7 +19,7 @@
  * queries already know would add traffic during exactly the outage where the
  * service is least able to absorb it.
  */
-import { useQueryClient } from "@tanstack/react-query";
+import { notifyManager, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 
 import { isApiError } from "@/lib/api/errors";
@@ -83,7 +83,13 @@ export function useBackendStatus(): BackendStatus {
     };
 
     read();
-    return cache.subscribe(read);
+    // The cache notifies subscribers synchronously, and a query is added to
+    // it while the component that owns it is rendering. Updating state right
+    // then is a state update during another component's render, which React
+    // rejects. Scheduling the read through the query library's own notifier
+    // moves it out of the render phase and coalesces a burst of cache events
+    // into one pass.
+    return cache.subscribe(() => notifyManager.schedule(read));
   }, [queryClient]);
 
   const retry = useCallback(() => {

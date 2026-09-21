@@ -43,8 +43,22 @@ import { z } from "zod";
 z.config({ jitless: true });
 
 const clientEnvSchema = z.object({
+  /**
+   * Either an absolute URL (`http://localhost:8000/api/v1`, the local
+   * development case) or a root-relative path (`/api/v1`) for deployments where
+   * the API is served from the same origin as the frontend -- on Vercel the
+   * backend service is routed under `/api` of the same domain. A same-origin
+   * path is what lets one value serve production and every preview URL, and
+   * `apiOriginForCsp` already reduces it to `'self'`.
+   */
   NEXT_PUBLIC_API_BASE_URL: z
-    .url({ message: "NEXT_PUBLIC_API_BASE_URL must be a valid absolute URL" })
+    .string()
+    // `//host/path` is protocol-relative, i.e. cross-origin; only a true path
+    // counts as same-origin.
+    .refine((value) => /^\/(?!\/)/.test(value) || z.url().safeParse(value).success, {
+      message:
+        "NEXT_PUBLIC_API_BASE_URL must be an absolute URL or a root-relative path such as /api/v1",
+    })
     .refine((value) => !value.endsWith("/"), {
       message: "NEXT_PUBLIC_API_BASE_URL must not end with a trailing slash",
     }),

@@ -117,9 +117,7 @@ export function Stat({
     <div className={cn("min-w-0", className)}>
       <dt className="text-subtle truncate text-xs">{label}</dt>
       <dd className="mt-0.5">
-        <span className="text-foreground block text-lg font-semibold tracking-tight">
-          {value}
-        </span>
+        <span className="text-foreground block text-lg font-semibold tracking-tight">{value}</span>
         {hint && <span className="text-subtle mt-0.5 block text-xs">{hint}</span>}
       </dd>
     </div>

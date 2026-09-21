@@ -6,6 +6,8 @@
  * that quietly rounds, rescales or relabels a KPI passes every "element is
  * visible" test ever written.
  */
+import type { Page } from "@playwright/test";
+
 import { expect, expectNoBrowserErrors, sessions, signIn, test, waitForData } from "./fixtures";
 
 test.beforeEach(async ({ page }) => {
@@ -13,10 +15,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("dashboard rendering", () => {
-  test("renders every section with real data and no browser errors", async ({
-    page,
-    problems,
-  }) => {
+  test("renders every section with real data and no browser errors", async ({ page, problems }) => {
     await page.goto("/dashboard");
     await waitForData(page);
 
@@ -160,11 +159,24 @@ test.describe("rendered values match the API", () => {
    * to catch the frontend changing a business meaning, so the test must not
    * perform the same calculation itself.
    */
-  async function statUnder(page: import("@playwright/test").Page, label: string) {
+  async function statUnder(page: Page, label: string) {
     const value = page
       .locator("dt", { hasText: new RegExp(`^${label}$`, "i") })
       .locator("xpath=following-sibling::dd[1]");
-    return (await value.first().innerText()).trim();
+    /*
+     * The first line only.
+     *
+     * A `Stat` renders its figure and its hint as two block elements inside the
+     * one `<dd>` -- "64.3%" then "Running machines as a share of the fleet". The
+     * hint used to sit outside as a sibling `<p>`, which is what axe-core
+     * flagged as `definition-list`: a `<dl>` group may contain only `<dt>` and
+     * `<dd>`, and a stray `<p>` breaks the term-description association a screen
+     * reader relies on.
+     *
+     * So the hint belongs where it now is, and this reads the figure rather than
+     * the figure plus its explanation.
+     */
+    return (await value.first().innerText()).trim().split("\n")[0].trim();
   }
 
   test("total production, defect rate, FPY, availability and OEE all agree", async ({ page }) => {
@@ -255,16 +267,12 @@ test.describe("rendered values match the API", () => {
     }
 
     const attention = await statUnder(page, "Needs attention");
-    expect(attention.replace(/,/g, "")).toBe(
-      String(summary.inventory.items_requiring_attention),
-    );
+    expect(attention.replace(/,/g, "")).toBe(String(summary.inventory.items_requiring_attention));
   });
 });
 
 test.describe("refresh behaviour", () => {
-  test("a manual refresh keeps the content on screen rather than blanking it", async ({
-    page,
-  }) => {
+  test("a manual refresh keeps the content on screen rather than blanking it", async ({ page }) => {
     await page.goto("/dashboard");
     await waitForData(page);
 

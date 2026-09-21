@@ -18,10 +18,14 @@
  * `docs/browser-e2e.md` records the callback as BLOCKED. Nothing in this file
  * is evidence about OAuth.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { test as base, expect, type Page } from "@playwright/test";
+
+import { sparePath } from "./global-setup";
 
 // Playwright transpiles specs to CommonJS, where `import.meta` is unavailable;
 // `__dirname` is what exists at runtime.
@@ -39,23 +43,69 @@ interface SessionFile {
   cookieName: string;
   csrfCookieName: string;
   apiBaseUrl: string;
-  sessions: Record<RoleCode, { token: string; email: string; name: string; userId: string }>;
+  sessions: Record<
+    RoleCode,
+    { token: string; email: string; name: string; userId: string; expiresAt: string }
+  >;
 }
 
 let cached: SessionFile | null = null;
 
+/**
+ * Re-mint when the shared sessions are close to expiring.
+ *
+ * Access tokens live fifteen minutes, which is the application's real setting
+ * and not something a test should change. The full suite takes longer than
+ * that. Minting once in `global-setup.ts` therefore left the last minutes of a
+ * run authenticating with tokens that had already expired -- and the failures
+ * did not look like expiry, because the browser was simply bounced to `/login`.
+ * Tests with nothing to do with authentication reported "expected Factory
+ * Operations, received Sign in".
+ *
+ * The margin is generous on purpose: a token that expires *during* a test fails
+ * in the middle of an assertion rather than cleanly before it.
+ *
+ * This is credential upkeep, not a retry. Nothing is re-run and no assertion is
+ * relaxed; the suite just declines to use a credential it knows is stale.
+ */
+const REMINT_MARGIN_MS = 5 * 60 * 1000;
+
+const SERVER_DIR = join(__dirname, "..", "..", "server");
+const PYTHON = join(SERVER_DIR, ".venv", "Scripts", "python.exe");
+
+function earliestExpiry(file: SessionFile): number {
+  const times = Object.values(file.sessions)
+    .map((session) => Date.parse(session.expiresAt))
+    .filter((value) => Number.isFinite(value));
+  return times.length > 0 ? Math.min(...times) : 0;
+}
+
+function readSessionFile(): SessionFile {
+  return JSON.parse(readFileSync(SESSIONS_PATH, "utf8")) as SessionFile;
+}
+
 export function sessions(): SessionFile {
-  if (cached) {
-    return cached;
+  if (!cached) {
+    if (!existsSync(SESSIONS_PATH)) {
+      throw new Error(
+        "e2e/.auth/sessions.json is missing. Generate it with:\n" +
+          "  cd server && python -m tools.mint_test_sessions ../client/e2e/.auth/sessions.json\n" +
+          "Tokens live 15 minutes; the suite re-mints them as it goes.",
+      );
+    }
+    cached = readSessionFile();
   }
-  if (!existsSync(SESSIONS_PATH)) {
-    throw new Error(
-      "e2e/.auth/sessions.json is missing. Generate it with:\n" +
-        "  cd server && python -m tools.mint_test_sessions ../client/e2e/.auth/sessions.json\n" +
-        "Tokens live 15 minutes; re-run if the suite has been idle.",
-    );
+
+  if (Date.now() > earliestExpiry(cached) - REMINT_MARGIN_MS) {
+    process.stdout.write("[fixtures] shared sessions near expiry; re-minting\n");
+    const python = existsSync(PYTHON) ? PYTHON : "python";
+    execFileSync(python, ["-m", "tools.mint_test_sessions", SESSIONS_PATH], {
+      cwd: SERVER_DIR,
+      encoding: "utf8",
+    });
+    cached = readSessionFile();
   }
-  cached = JSON.parse(readFileSync(SESSIONS_PATH, "utf8")) as SessionFile;
+
   return cached;
 }
 
@@ -80,6 +130,130 @@ export async function signIn(page: Page, role: RoleCode = "ADMIN"): Promise<void
       sameSite: "Lax",
     },
   ]);
+}
+
+/**
+ * Sign in with a session that belongs to this test alone.
+ *
+ * Use this, not `signIn`, whenever a test destroys the session it signs in
+ * with -- signing out, or anything else that revokes a token.
+ *
+ * WHY THIS EXISTS
+ *
+ * `signIn` installs a token from the shared pool minted once per run. Signing
+ * out does not merely clear the cookie: the API adds the token's id to a
+ * revocation denylist in Redis, and the token is dead everywhere from that
+ * moment. So one test signing out took the shared ADMIN session with it, and
+ * every later spec that signed in as ADMIN was silently browsing as a signed-out
+ * visitor. The failures pointed nowhere near the cause -- assertions across
+ * `dashboard`, `pages`, `responsive` and `errors` reported "expected Factory
+ * Operations, received Sign in", on tests with no interest in authentication.
+ *
+ * It hid for a while behind an unlucky coincidence. The first probe written to
+ * test this exact theory ran while Redis happened to be down, and the
+ * revocation check fails open when the cache is unreachable, so the shared token
+ * still worked and the theory looked wrong. Re-run with Redis up, the same probe
+ * returns 401 for ADMIN and 200 for VIEWER.
+ *
+ * Minting here is cheap and, more to the point, correct: a test that consumes a
+ * credential should own that credential.
+ */
+export async function signInDisposable(page: Page, role: RoleCode = "ADMIN"): Promise<void> {
+  const file = nextSpareSession();
+  const session = file.sessions[role];
+  if (!session) {
+    throw new Error(`No minted session for role ${role}.`);
+  }
+  await page.context().addCookies([
+    {
+      name: file.cookieName,
+      value: session.token,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      secure: false,
+      sameSite: "Lax",
+    },
+  ]);
+}
+
+let spareIndex = 0;
+
+/**
+ * Take the next unused spare set, minting one only if the pool runs dry.
+ *
+ * The spares are produced by `global-setup.ts` before any test runs, so the
+ * normal path touches no network at all. The fallback exists so that adding a
+ * third destructive test does not silently reuse a consumed session -- it will
+ * work, just more slowly, and `SPARE_SESSION_COUNT` should then be raised.
+ */
+function nextSpareSession(): SessionFile {
+  const path = sparePath(spareIndex);
+  spareIndex += 1;
+
+  if (existsSync(path)) {
+    return JSON.parse(readFileSync(path, "utf8")) as SessionFile;
+  }
+
+  const python = existsSync(PYTHON) ? PYTHON : "python";
+  const target = join(tmpdir(), `acf-e2e-${process.pid}-${spareIndex}-${Date.now()}.json`);
+  try {
+    execFileSync(python, ["-m", "tools.mint_test_sessions", target], {
+      cwd: SERVER_DIR,
+      encoding: "utf8",
+    });
+    return JSON.parse(readFileSync(target, "utf8")) as SessionFile;
+  } finally {
+    rmSync(target, { force: true });
+  }
+}
+
+/**
+ * Record the API calls a page makes, so a test can re-ask the page's question.
+ *
+ * A cross-check is only meaningful when both sides asked the same thing. These
+ * tests used to call an endpoint bare -- `/production`, `/analytics/oee` -- while
+ * the page asked for an explicit date window, and then required the two answers
+ * to be equal. They agreed for as long as the backend's default window happened
+ * to match the page's, and stopped agreeing the moment it did not: the suite
+ * ran past local midnight, and since this machine is UTC+5:30 the local date had
+ * rolled over while the backend's had not. The page counted 966 production
+ * records over one window, the test's bare call counted 927 over another, and
+ * the failure read as though the UI were displaying the wrong total.
+ *
+ * Nothing about the application was wrong. The test was comparing two different
+ * questions, so it now replays the exact URL the browser used.
+ *
+ * Call this *before* `page.goto`, since it starts recording from that moment.
+ */
+export function recordApiRequests(page: Page): string[] {
+  const urls: string[] = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (url.includes("/api/v1/")) {
+      urls.push(url);
+    }
+  });
+  return urls;
+}
+
+/**
+ * The URL the page actually used for an endpoint.
+ *
+ * Matches on the exact pathname, so `/production` does not also select
+ * `/production/by-line`. `occurrence` picks between repeats -- the quality page
+ * asks `/quality/defects` twice, once for the Pareto and once for the table.
+ */
+export function requestFor(urls: string[], endpoint: string, occurrence = 0): string {
+  const matches = urls.filter((url) => new URL(url).pathname.endsWith(endpoint));
+  const match = matches[occurrence];
+  if (!match) {
+    throw new Error(
+      `The page never made request ${occurrence} to ${endpoint}. Recorded: ` +
+        `${urls.map((url) => new URL(url).pathname).join(", ")}`,
+    );
+  }
+  return match;
 }
 
 export async function signOutAllCookies(page: Page): Promise<void> {
@@ -109,7 +283,7 @@ export interface BrowserProblems {
 const EXPECTED_CONSOLE = [/401 \(Unauthorized\)/i];
 
 export const test = base.extend<{ problems: BrowserProblems }>({
-  problems: async ({ page }, use) => {
+  problems: async ({ page }, runTest) => {
     const problems: BrowserProblems = {
       consoleErrors: [],
       pageErrors: [],
@@ -147,7 +321,10 @@ export const test = base.extend<{ problems: BrowserProblems }>({
       problems.failedRequests.push(`${request.method()} ${request.url()} — ${failure}`);
     });
 
-    await use(problems);
+    // Named `runTest` rather than Playwright's conventional `use`: the
+    // react-hooks lint rule reads a bare `use(...)` as React's `use` hook
+    // and rejects it outside a component. Same function, different name.
+    await runTest(problems);
   },
 });
 

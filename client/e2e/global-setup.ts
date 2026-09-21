@@ -39,6 +39,18 @@ async function requireReachable(label: string, url: string, expected: number[]):
   }
 }
 
+/**
+ * How many single-use session sets to mint.
+ *
+ * One per test that destroys a session: the sign-out test in `auth.spec.ts` and
+ * the CSRF happy path in `security.spec.ts`, plus one in hand.
+ */
+export const SPARE_SESSION_COUNT = 3;
+
+export function sparePath(index: number): string {
+  return join(__dirname, ".auth", `spare-${index}.json`);
+}
+
 export default async function globalSetup(): Promise<void> {
   await requireReachable("The backend", `${API}/health`, [200]);
   await requireReachable("The frontend", `${APP}/login`, [200]);
@@ -51,21 +63,61 @@ export default async function globalSetup(): Promise<void> {
     data: { status: string; dependencies: { name: string; healthy: boolean }[] };
   };
   const unhealthy = body.data.dependencies.filter((dependency) => !dependency.healthy);
-  if (body.data.status !== "ready") {
+
+  /*
+   * Block on the database, not on "not perfectly healthy".
+   *
+   * The message here has always said that Redis being down degrades rather
+   * than blocks, and the check did not agree with it: any status other than
+   * "ready" stopped the run, and a Redis outage reports "degraded". So the
+   * one scenario the suite most wants to exercise -- the application running
+   * with its cache gone -- was the one it refused to start for.
+   *
+   * The database is different. Every data assertion in the suite reads real
+   * rows, so without PostgreSQL the run would fail everywhere at once and
+   * report nothing useful.
+   */
+  const database = body.data.dependencies.find((dependency) => dependency.name === "database");
+  if (!database?.healthy) {
     throw new Error(
-      `The backend is "${body.data.status}". Unhealthy: ` +
-        `${unhealthy.map((dependency) => dependency.name).join(", ") || "none"}.\n` +
-        `  The suite needs a live database. Redis being down degrades but does not block.`,
+      `The backend is "${body.data.status}" and the database is unreachable.` +
+        `  The suite asserts against real rows, so it cannot run without it.`,
+    );
+  }
+  if (unhealthy.length > 0) {
+    process.stdout.write(
+      `[global-setup] backend is "${body.data.status}"; degraded: ` +
+        `${unhealthy.map((dependency) => dependency.name).join(", ")}. Continuing.\n`,
     );
   }
 
   const pythonPath = existsSync(PYTHON) ? PYTHON : "python";
   try {
-    const output = execFileSync(
-      pythonPath,
-      ["-m", "tools.mint_test_sessions", SESSIONS_PATH],
-      { cwd: SERVER_DIR, encoding: "utf8" },
-    );
+    const output = execFileSync(pythonPath, ["-m", "tools.mint_test_sessions", SESSIONS_PATH], {
+      cwd: SERVER_DIR,
+      encoding: "utf8",
+    });
+
+    /*
+     * Spare, single-use session sets for the tests that destroy a session.
+     *
+     * Signing out revokes a token for good, so a test that signs out cannot use
+     * the shared pool -- see `signInDisposable` in `fixtures.ts`. Those spares
+     * are minted here rather than mid-run for one reason: minting reaches the
+     * database, and doing that from inside a test makes every such test share
+     * the network's luck. A DNS blip on this machine failed one of them with
+     * `getaddrinfo failed` in the middle of a CSRF assertion, which reads as a
+     * CSRF defect and is nothing of the sort.
+     *
+     * Doing it here concentrates the network dependency at one labelled point:
+     * if it fails, the run stops before a single test has claimed anything.
+     */
+    for (let index = 0; index < SPARE_SESSION_COUNT; index += 1) {
+      execFileSync(pythonPath, ["-m", "tools.mint_test_sessions", sparePath(index)], {
+        cwd: SERVER_DIR,
+        encoding: "utf8",
+      });
+    }
     // Prints role names only; the tool never writes tokens to stdout.
     process.stdout.write(`[global-setup] ${output.trim()}\n`);
   } catch (error) {

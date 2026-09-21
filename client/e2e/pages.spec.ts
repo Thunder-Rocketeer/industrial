@@ -5,31 +5,36 @@
  * API, do its filters actually change the request, and does pagination move
  * through real rows.
  */
-import { expect, expectNoBrowserErrors, sessions, signIn, test, waitForData } from "./fixtures";
+import {
+  expect,
+  expectNoBrowserErrors,
+  recordApiRequests,
+  requestFor,
+  sessions,
+  signIn,
+  test,
+  waitForData,
+} from "./fixtures";
 
 test.beforeEach(async ({ page }) => {
   await signIn(page, "ADMIN");
 });
 
 test.describe("production", () => {
-  test("renders KPIs, chart and a table whose totals match the API", async ({
-    page,
-    problems,
-  }) => {
+  test("renders KPIs, chart and a table whose totals match the API", async ({ page, problems }) => {
+    // Recorded before navigating: the comparison below must ask the API the
+    // same question the page asked, date window and all.
+    const requests = recordApiRequests(page);
     await page.goto("/production");
     await waitForData(page);
 
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Production");
 
-    const api = (
-      await (await page.request.get(`${sessions().apiBaseUrl}/production?page=1&page_size=25`)).json()
-    );
+    const api = await (await page.request.get(requestFor(requests, "/production"))).json();
     const total = api.pagination.total as number;
 
     // The pagination label states the real total, not a page-local count.
-    await expect(page.locator("main")).toContainText(
-      `of ${total.toLocaleString("en-US")} records`,
-    );
+    await expect(page.locator("main")).toContainText(`of ${total.toLocaleString("en-US")} records`);
     // Scoped by the table's caption: every chart also renders a `<details>`
     // data table, and an unscoped `table tbody tr` counts those rows too.
     const recordsTable = page.getByRole("table", { name: /Production records/i });
@@ -50,9 +55,8 @@ test.describe("production", () => {
     const beforeTotal = await status.innerText();
 
     // Pick a real machine from the live list.
-    const machines = (
-      await (await page.request.get(`${sessions().apiBaseUrl}/machines`)).json()
-    ).data as { id: string; code: string; name: string }[];
+    const machines = (await (await page.request.get(`${sessions().apiBaseUrl}/machines`)).json())
+      .data as { id: string; code: string; name: string }[];
     const machine = machines[0];
 
     const request = page.waitForRequest(
@@ -83,9 +87,8 @@ test.describe("production", () => {
     await page.goto("/production");
     await waitForData(page);
 
-    const machines = (
-      await (await page.request.get(`${sessions().apiBaseUrl}/machines`)).json()
-    ).data as { id: string }[];
+    const machines = (await (await page.request.get(`${sessions().apiBaseUrl}/machines`)).json())
+      .data as { id: string }[];
     await page.getByLabel("Machine").selectOption(machines[0].id);
     await waitForData(page);
 
@@ -142,7 +145,9 @@ test.describe("production", () => {
     await page.goto("/production?start_date=2020-01-01&end_date=2020-01-02");
     await waitForData(page);
 
-    await expect(page.locator("main")).toContainText(/No production records found|No production in this range/i);
+    await expect(page.locator("main")).toContainText(
+      /No production records found|No production in this range/i,
+    );
     await expect(page.locator("main")).not.toContainText(/NaN|undefined/);
   });
 });
@@ -152,13 +157,14 @@ test.describe("quality", () => {
     page,
     problems,
   }) => {
+    const requests = recordApiRequests(page);
     await page.goto("/quality");
     await waitForData(page);
 
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Quality");
 
     const summary = (
-      await (await page.request.get(`${sessions().apiBaseUrl}/quality/summary`)).json()
+      await (await page.request.get(requestFor(requests, "/quality/summary"))).json()
     ).data;
 
     await expect(page.locator("main")).toContainText(
@@ -170,7 +176,7 @@ test.describe("quality", () => {
 
     // The Pareto keeps the backend's ranking.
     const defects = (
-      await (await page.request.get(`${sessions().apiBaseUrl}/quality/defects?limit=20`)).json()
+      await (await page.request.get(requestFor(requests, "/quality/defects"))).json()
     ).data as { defect_name: string }[];
     if (defects.length > 0) {
       await expect(page.locator("main")).toContainText(defects[0].defect_name);
@@ -241,9 +247,8 @@ test.describe("machines", () => {
     await page.goto("/machines");
     await waitForData(page);
 
-    const machines = (
-      await (await page.request.get(`${sessions().apiBaseUrl}/machines`)).json()
-    ).data as { code: string; status_label: string }[];
+    const machines = (await (await page.request.get(`${sessions().apiBaseUrl}/machines`)).json())
+      .data as { code: string; status_label: string }[];
 
     for (const machine of machines.slice(0, 5)) {
       // The code is a button whose accessible name also carries ", open machine
@@ -263,9 +268,8 @@ test.describe("machines", () => {
     // From the API, so the expected code is not read back out of the same DOM
     // the assertion is about. The button's own text carries a visually hidden
     // ", open machine detail for ..." suffix.
-    const machines = (
-      await (await page.request.get(`${sessions().apiBaseUrl}/machines`)).json()
-    ).data as { code: string }[];
+    const machines = (await (await page.request.get(`${sessions().apiBaseUrl}/machines`)).json())
+      .data as { code: string }[];
 
     await page.locator("table tbody tr td:first-child button").first().click();
     await page.waitForURL(/\/machines\/[0-9a-f-]{36}/);
@@ -293,16 +297,19 @@ test.describe("machines", () => {
     await page.goto("/machines/not-a-uuid");
     await waitForData(page);
 
-    await expect(page.locator("main")).toContainText(/not found|does not exist|unable to load|not valid/i);
+    await expect(page.locator("main")).toContainText(
+      /not found|does not exist|unable to load|not valid/i,
+    );
   });
 });
 
 test.describe("analytics", () => {
   test("shows OEE and its three factors, agreeing with the API", async ({ page, problems }) => {
+    const requests = recordApiRequests(page);
     await page.goto("/analytics");
     await waitForData(page);
 
-    const oee = (await (await page.request.get(`${sessions().apiBaseUrl}/analytics/oee`)).json())
+    const oee = (await (await page.request.get(requestFor(requests, "/analytics/oee"))).json())
       .data;
 
     for (const value of [

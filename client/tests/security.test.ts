@@ -282,7 +282,20 @@ describe("UI-layer security (Phase 6)", () => {
     // `?next=https://evil.example` must not survive into a navigation.
     const login = sourceFiles.find((file) => file.path === "app/login/page.tsx");
     expect(login?.content).toContain("safeNextPath");
-    expect(login?.content).toContain('value.startsWith("//")');
+
+    /*
+     * The guard rejects more than a leading `//` now.
+     *
+     * It used to test exactly that, and passed `/\evil.example` straight
+     * through into the sign-in link -- browsers normalise a backslash to a
+     * forward slash, so that is the same protocol-relative URL in a different
+     * coat. The API always rejected it, so the application was never
+     * vulnerable, but the frontend filter was weaker than the rule it was
+     * standing in for. It now mirrors the backend, decoding pass included.
+     */
+    expect(login?.content).toContain('form.startsWith("//")');
+    expect(login?.content).toContain("decodeURIComponent");
+    expect(login?.content).toContain('form.includes("\\\\")');
   });
 
   it("uses exactly one charting library", () => {
