@@ -157,6 +157,10 @@ def is_allowed_origin(origin: str | None, settings: Settings) -> bool:
     if not parsed.scheme or not parsed.netloc:
         return False
 
+    # "*" means every browser origin is a permitted frontend.
+    if "*" in settings.cors_allowed_origins:
+        return True
+
     normalized = f"{parsed.scheme}://{parsed.netloc}"
     return normalized in {
         _origin_of(allowed) or allowed for allowed in settings.cors_allowed_origins

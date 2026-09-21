@@ -41,21 +41,49 @@ class DataSource(str, Enum):
     POSTGRES = "postgres"
 
 
+#: Public site the browser is served from. CORS, the Google callback and the
+#: post-login redirects are all derived from this host.
+FRONTEND_ORIGIN = "https://industrial-ui.vercel.app"
+
+#: Field names that stay at their code defaults. `server/.env` and the process
+#: environment cannot change them.
+_FIXED_FIELDS = frozenset(
+    {
+        "app_env",
+        "cors_allowed_origins",
+        "google_redirect_uri",
+        "frontend_login_success_url",
+        "frontend_login_failure_url",
+        "cookie_secure",
+        "cache_enabled",
+    }
+)
+
+
+class _EnvWithoutFixedFields:
+    """Hide the fixed fields from an environment or dotenv source."""
+
+    def __init__(self, source: object) -> None:
+        self._source = source
+
+    def __call__(self) -> dict[str, object]:
+        loaded = self._source()
+        return {key: value for key, value in loaded.items() if key not in _FIXED_FIELDS}
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._source, name)
+
+
 class Settings(BaseSettings):
     """Typed, validated application settings.
 
     DEFAULTS ARE THE PRODUCTION DEPLOYMENT
 
-    Every default below describes the hosted service: the backend on Render,
-    the frontend on Vercel at `industrial-ui.vercel.app`, the CSV exports as the
-    data source, no Redis. A deployment therefore needs no configuration beyond
-    its three secrets (`SECRET_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`),
-    which are the only values that must never be committed.
-
-    Local development is the case that overrides: `server/.env` (copied from
-    `.env.example`) turns the environment back to `development`, points every
-    URL at localhost and drops `COOKIE_SECURE`. Without that file the process
-    starts in production mode and, correctly, refuses to run without a secret.
+    The hosted frontend is `industrial-ui.vercel.app`. The environment, CORS
+    origin, Google callback, post-login URLs, the Secure cookie flag and the
+    cache switch are fixed in this class. `server/.env` and the process
+    environment cannot change them. A deployment still supplies its secrets
+    (`SECRET_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
     """
 
     model_config = SettingsConfigDict(
@@ -65,6 +93,23 @@ class Settings(BaseSettings):
         # Tolerate unrelated variables in the shell environment.
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: object,
+        env_settings: object,
+        dotenv_settings: object,
+        file_secret_settings: object,
+    ) -> tuple[object, ...]:
+        """Keep init overrides, and ignore env for the fields fixed in code."""
+        return (
+            init_settings,
+            _EnvWithoutFixedFields(env_settings),
+            _EnvWithoutFixedFields(dotenv_settings),
+            _EnvWithoutFixedFields(file_secret_settings),
+        )
 
     # -- Application ----------------------------------------------------------
     app_name: str = "Automobile Component Factory API"
@@ -76,12 +121,12 @@ class Settings(BaseSettings):
     workers: int = Field(default=4, ge=1, le=64)
     log_level: str = "INFO"
 
-    # -- CORS (spec section 61) -----------------------------------------------
+    # -- CORS -------------------------------------------------------------------
     # NoDecode suppresses pydantic-settings' default JSON decoding for complex
     # types, so the validator below can accept a plain comma-separated string --
     # which is the only practical way to express a list in a .env file.
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["https://industrial-ui.vercel.app"]
+        default_factory=lambda: [FRONTEND_ORIGIN]
     )
 
     # -- Data source ----------------------------------------------------------
@@ -189,10 +234,10 @@ class Settings(BaseSettings):
     # The frontend proxies /api/* to this service, so the callback is on the
     # Vercel host (docs/deployment.md section 1). Registered verbatim in the
     # Google Cloud Console.
-    google_redirect_uri: str = "https://industrial-ui.vercel.app/api/v1/auth/google/callback"
+    google_redirect_uri: str = f"{FRONTEND_ORIGIN}/api/v1/auth/google/callback"
     google_oidc_issuer: str = "https://accounts.google.com"
-    frontend_login_success_url: str = "https://industrial-ui.vercel.app/dashboard"
-    frontend_login_failure_url: str = "https://industrial-ui.vercel.app/login?error=auth_failed"
+    frontend_login_success_url: str = f"{FRONTEND_ORIGIN}/dashboard"
+    frontend_login_failure_url: str = f"{FRONTEND_ORIGIN}/login?error=auth_failed"
 
     # -- Rate limiting (spec section 60) --------------------------------------
     #: Off until a Redis instance exists: the limiter fails open without one
@@ -223,17 +268,6 @@ class Settings(BaseSettings):
         """Accept a comma-separated string, which is how .env files carry lists."""
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
-
-    @field_validator("cors_allowed_origins")
-    @classmethod
-    def _reject_wildcard_origin(cls, value: list[str]) -> list[str]:
-        """Spec section 61: a wildcard origin is invalid for credentialed requests."""
-        if "*" in value:
-            raise ValueError(
-                "CORS_ALLOWED_ORIGINS must not contain '*'. The browser sends "
-                "credentialed requests, so origins must be explicitly listed."
-            )
         return value
 
     @field_validator("auth_allowed_email_domains", "auth_allowed_emails", mode="before")

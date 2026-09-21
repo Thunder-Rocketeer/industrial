@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.config import FRONTEND_ORIGIN, Environment, Settings
 
 #: A production configuration that satisfies the fail-closed checks in
 #: `Settings`. Used by tests that need `APP_ENV=production` for some *other*
@@ -23,15 +23,43 @@ SECURE_PRODUCTION = {
 }
 
 
-def test_wildcard_cors_origin_is_rejected() -> None:
-    """Spec section 61: '*' is invalid because requests carry credentials."""
-    with pytest.raises(ValidationError, match=r"must not contain"):
-        Settings(cors_allowed_origins=["*"], _env_file=None)
+def test_fixed_deployment_settings_ignore_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These values live in code. Env vars must not move the hosted service."""
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("COOKIE_SECURE", "false")
+    monkeypatch.setenv("CACHE_ENABLED", "true")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/cb")
+    monkeypatch.setenv("FRONTEND_LOGIN_SUCCESS_URL", "http://localhost:3000/dashboard")
+    monkeypatch.setenv("FRONTEND_LOGIN_FAILURE_URL", "http://localhost:3000/login")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.app_env is Environment.PRODUCTION
+    assert settings.cookie_secure is True
+    assert settings.cache_enabled is False
+    assert settings.cors_allowed_origins == [FRONTEND_ORIGIN]
+    assert settings.google_redirect_uri == f"{FRONTEND_ORIGIN}/api/v1/auth/google/callback"
+    assert settings.frontend_login_success_url == f"{FRONTEND_ORIGIN}/dashboard"
+    assert settings.frontend_login_failure_url == f"{FRONTEND_ORIGIN}/login?error=auth_failed"
+
+
+def test_wildcard_cors_origin_allows_every_domain() -> None:
+    """'*' is accepted and treats any browser origin as allowed."""
+    from app.security.redirects import is_allowed_origin
+
+    settings = Settings(cors_allowed_origins="*", _env_file=None)
+
+    assert settings.cors_allowed_origins == ["*"]
+    assert is_allowed_origin("https://anywhere.example", settings)
+    assert is_allowed_origin("http://192.168.1.20:3000", settings)
+    assert is_allowed_origin(None, settings) is False
 
 
 def test_comma_separated_origins_are_parsed() -> None:
     """A .env file carries lists as a comma-separated string."""
     settings = Settings(
+        app_env="development",
         cors_allowed_origins="http://localhost:3000, http://127.0.0.1:3000",
         _env_file=None,
     )

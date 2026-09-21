@@ -976,25 +976,37 @@ def suite_security(users, base, results: Results) -> None:
         csrf_response = client.get("/auth/csrf")
         if results.check(csrf_response.status_code == 200, "CSRF: token endpoint responds"):
             csrf = csrf_response.json()["data"]["csrf_token"]
-            allowed_origin = settings.cors_allowed_origins[0]
+            allows_any_origin = "*" in settings.cors_allowed_origins
+            allowed_origin = (
+                "http://localhost:3000"
+                if allows_any_origin
+                else settings.cors_allowed_origins[0]
+            )
 
             foreign = client.post(
                 "/auth/logout", headers={"X-CSRF-Token": csrf, "Origin": "https://evil.example"}
             )
-            results.check(
-                foreign.status_code == 403,
-                "CSRF: a foreign Origin is refused",
-                f"HTTP {foreign.status_code}",
-            )
-
-            good = client.post(
-                "/auth/logout", headers={"X-CSRF-Token": csrf, "Origin": allowed_origin}
-            )
-            results.check(
-                good.status_code == 200,
-                "CSRF: correct token and Origin succeeds",
-                f"HTTP {good.status_code}",
-            )
+            if allows_any_origin:
+                # That request is itself the logout, so the session is gone.
+                results.check(
+                    foreign.status_code == 200,
+                    "CSRF: wildcard CORS accepts any Origin",
+                    f"HTTP {foreign.status_code}",
+                )
+            else:
+                results.check(
+                    foreign.status_code == 403,
+                    "CSRF: a foreign Origin is refused",
+                    f"HTTP {foreign.status_code}",
+                )
+                good = client.post(
+                    "/auth/logout", headers={"X-CSRF-Token": csrf, "Origin": allowed_origin}
+                )
+                results.check(
+                    good.status_code == 200,
+                    "CSRF: correct token and Origin succeeds",
+                    f"HTTP {good.status_code}",
+                )
 
     # Open redirect containment on the login entry point.
     with anon_client(base) as client:

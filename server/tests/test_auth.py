@@ -333,7 +333,9 @@ def test_signing_without_a_secret_is_refused() -> None:
     """An empty key would produce tokens anyone could forge."""
     with pytest.raises(TokenConfigurationError, match="SECRET_KEY"):
         issue_access_token(
-            user_id=uuid.uuid4(), role="ADMIN", settings=Settings(secret_key="", _env_file=None)
+            user_id=uuid.uuid4(),
+            role="ADMIN",
+            settings=Settings(app_env="development", secret_key="", _env_file=None),
         )
 
 

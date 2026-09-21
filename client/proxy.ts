@@ -125,8 +125,8 @@ export const config = {
    * Everything except the API, Next.js internals, static assets and the
    * favicon.
    *
-   * `/api` is excluded because when `API_PROXY_TARGET` is set (next.config.ts)
-   * those requests are rewritten to the backend, which authenticates them
+   * `/api` is excluded because next.config.ts rewrites those requests to
+   * https://industrial-1-807h.onrender.com. The backend authenticates them
    * itself and must be reachable without a session: the sign-in endpoints are
    * the ones that *create* it. Gating them here would bounce the OAuth start
    * to the login page, and sign-in could never begin.

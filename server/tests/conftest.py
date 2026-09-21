@@ -16,11 +16,10 @@ from fastapi.testclient import TestClient
 
 # Must be set before app.config is imported, since Settings reads the
 # environment at construction time.
-os.environ.setdefault("APP_ENV", "development")
-os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-used-in-any-real-deployment")
-os.environ.setdefault("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+# Production mode is fixed in code and refuses to start when DEBUG is true.
+os.environ["DEBUG"] = "false"
 
 # Tests must not touch external services. Without these the application
 # lifespan attempts a Redis connection on every TestClient context, which added

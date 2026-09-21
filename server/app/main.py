@@ -408,8 +408,9 @@ def register_middleware(app: FastAPI, settings: Settings) -> None:
         path=f"{settings.api_v1_prefix}/auth",
     )
 
-    # Spec section 61: explicit origin allow-list, never a wildcard. Credentials
-    # are enabled because the session travels in an HTTP-only cookie.
+    # Credentials stay on because the session travels in an HTTP-only cookie.
+    # "*" is allowed: Starlette echoes the request Origin instead of sending a
+    # literal "*", which browsers reject on credentialed responses.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allowed_origins,
