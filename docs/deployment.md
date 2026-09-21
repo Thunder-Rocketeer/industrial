@@ -47,33 +47,37 @@ match it by hand in the dashboard:
 | Start | `gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:$PORT` |
 | Health check path | `/api/v1/health/live` |
 
-Environment variables the blueprint fixes: `APP_ENV=production`, `DEBUG=false`,
-`DATA_SOURCE=csv`, `CSV_DATA_DIR=./supabase_csv_exports`, `COOKIE_SECURE=true`,
-`COOKIE_SAMESITE=lax`, `CACHE_ENABLED=false`, `RATE_LIMIT_ENABLED=false`.
+### Configuration is in the repository
 
-Environment variables you supply (they name your Vercel domain or are secrets):
+The service's public configuration is committed in
+[`server/render.env`](../server/render.env): `APP_ENV=production`, the data
+source, the cookie flags, the Redis switches, and every URL that names the
+Vercel domain (`CORS_ALLOWED_ORIGINS`, `GOOGLE_REDIRECT_URI`,
+`FRONTEND_LOGIN_*_URL`). The backend reads that file by itself whenever it
+runs on Render -- it checks for the `RENDER` variable Render sets on every
+service (`server/app/config.py`, `_env_files`). Local development never loads
+it. To move to a new frontend domain, edit the file and push.
+
+Anything set in the Render dashboard overrides the file, which is where the
+three values that must never be committed go. Set these under
+**Environment** and nothing else:
 
 ```
-CORS_ALLOWED_ORIGINS=https://<app>.vercel.app
-GOOGLE_REDIRECT_URI=https://<app>.vercel.app/api/v1/auth/google/callback
-FRONTEND_LOGIN_SUCCESS_URL=https://<app>.vercel.app/dashboard
-FRONTEND_LOGIN_FAILURE_URL=https://<app>.vercel.app/login?error=auth_failed
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 SECRET_KEY=<at least 32 chars; python -c "import secrets; print(secrets.token_urlsafe(64))">
-AUTH_ALLOWED_EMAIL_DOMAINS=   (optional; empty = any Google account)
-AUTH_ALLOWED_EMAILS=          (optional)
 ```
 
 With `APP_ENV=production` the settings validator refuses to start on an
 insecure combination -- an `http://` redirect URI, a non-Secure cookie, a
-short `SECRET_KEY`, `DEBUG=true` -- and the log says exactly which one.
+short or missing `SECRET_KEY`, `DEBUG=true` -- and the log says exactly which
+one. A missing `SECRET_KEY` is the usual first-deploy failure.
 
 ### Redis
 
 Not required. Without it the cache is bypassed and the rate limiter fails
-open. When an instance exists, set `REDIS_URL`, then `CACHE_ENABLED=true` and
-`RATE_LIMIT_ENABLED=true`.
+open. When an instance exists, set `REDIS_URL` in the dashboard and flip
+`CACHE_ENABLED` and `RATE_LIMIT_ENABLED` to `true` in `server/render.env`.
 
 ### Free-tier note
 

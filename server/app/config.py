@@ -11,6 +11,7 @@ constructing :class:`Settings` directly.
 
 from __future__ import annotations
 
+import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -41,11 +42,28 @@ class DataSource(str, Enum):
     POSTGRES = "postgres"
 
 
+def _env_files() -> tuple[Path, ...]:
+    """The dotenv files to read, lowest precedence first.
+
+    `server/.env` is the developer's local file and is never committed. On
+    Render -- detected by the `RENDER` variable the platform sets on every
+    service -- the committed `server/render.env` is read as well, so the
+    deployment's public configuration (hostnames, feature switches) lives in
+    the repository rather than being retyped into a dashboard. Real
+    environment variables still override both files, which is where the
+    secrets stay.
+    """
+    files = [BASE_DIR / ".env"]
+    if os.environ.get("RENDER"):
+        files.append(BASE_DIR / "render.env")
+    return tuple(files)
+
+
 class Settings(BaseSettings):
     """Typed, validated application settings."""
 
     model_config = SettingsConfigDict(
-        env_file=BASE_DIR / ".env",
+        env_file=_env_files(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         # Tolerate unrelated variables in the shell environment.

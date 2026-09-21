@@ -6,8 +6,10 @@
 # That is what lets the HttpOnly session cookie work: it is set on, and sent
 # back to, the same site (client/next.config.ts explains the mechanism).
 #
-# Values marked `sync: false` are secrets or deployment-specific URLs. Render
-# prompts for them on first deploy and never reads them from this file.
+# The service's public configuration -- hostnames, feature switches, the data
+# source -- is committed in server/render.env, which the backend reads on its
+# own whenever it runs on Render. Only the secrets are declared here, and
+# `sync: false` means Render prompts for them rather than reading this file.
 #
 # Docs: https://render.com/docs/blueprint-spec
 # ==============================================================================
@@ -35,49 +37,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"
-      - key: APP_ENV
-        value: production
-      - key: DEBUG
-        value: "false"
-      - key: LOG_LEVEL
-        value: INFO
-
-      # -- Data source: the CSV exports checked in under server/ --------------
-      - key: DATA_SOURCE
-        value: csv
-      - key: CSV_DATA_DIR
-        value: ./supabase_csv_exports
-
-      # -- Redis is not provisioned on the free tier. Both features are
-      # -- backed by it: the cache is switched off, and the limiter too --
-      # -- it fails open without Redis anyway, but logs a warning on every
-      # -- request while doing so. When a Redis instance exists, set
-      # -- REDIS_URL and flip both to "true".
-      - key: CACHE_ENABLED
-        value: "false"
-      - key: RATE_LIMIT_ENABLED
-        value: "false"
-
-      # -- Cookies: HTTPS end to end; same-site via the Vercel proxy ----------
-      - key: COOKIE_SECURE
-        value: "true"
-      - key: COOKIE_SAMESITE
-        value: lax
-
-      # -- Deployment-specific: the Vercel origin and Google credentials ------
-      # CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app
-      - key: CORS_ALLOWED_ORIGINS
-        sync: false
-      # GOOGLE_REDIRECT_URI=https://<your-app>.vercel.app/api/v1/auth/google/callback
-      # (must also be registered on the OAuth client in Google Cloud Console)
-      - key: GOOGLE_REDIRECT_URI
-        sync: false
-      # FRONTEND_LOGIN_SUCCESS_URL=https://<your-app>.vercel.app/dashboard
-      - key: FRONTEND_LOGIN_SUCCESS_URL
-        sync: false
-      # FRONTEND_LOGIN_FAILURE_URL=https://<your-app>.vercel.app/login?error=auth_failed
-      - key: FRONTEND_LOGIN_FAILURE_URL
-        sync: false
+      # Everything else lives in server/render.env. These three never can.
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
@@ -85,13 +45,3 @@ services:
       # At least 32 characters; python -c "import secrets; print(secrets.token_urlsafe(64))"
       - key: SECRET_KEY
         generateValue: true
-
-      # -- Who may sign in (spec section 28); empty = any Google account ------
-      - key: AUTH_ALLOWED_EMAIL_DOMAINS
-        sync: false
-      - key: AUTH_ALLOWED_EMAILS
-        sync: false
-      - key: AUTH_AUTO_PROVISION
-        value: "true"
-      - key: AUTH_DEFAULT_ROLE
-        value: VIEWER
