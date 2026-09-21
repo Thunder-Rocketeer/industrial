@@ -26,6 +26,11 @@ os.environ.setdefault("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 # lifespan attempts a Redis connection on every TestClient context, which added
 # roughly two minutes to a full run purely in connection timeouts.
 os.environ.setdefault("CACHE_ENABLED", "false")
+# The API suite runs against an *absent* database and asserts on the clean 503
+# that produces. The default data source is the CSV export folder, which is
+# present in this repository and would quietly turn those tests into
+# integration tests, so the PostgreSQL path is selected explicitly here.
+os.environ.setdefault("DATA_SOURCE", "postgres")
 os.environ.setdefault("DATABASE_URL", "")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "true")
 

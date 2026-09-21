@@ -1,1 +1,1 @@
-"""Supabase and PostgreSQL connection management, plus the seed command."""
+"""Data access backends: the PostgreSQL pool, the CSV-backed store, and the seed command."""

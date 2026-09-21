@@ -1,0 +1,7 @@
+id,code,name,description,rank,created_at,updated_at
+33f3f6ed-1a28-54c4-8253-1d7d18fbefa1,ADMIN,Administrator,Full application administration.,1,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+77192bee-aa36-5c4e-8253-d1d840645c69,FACTORY_MANAGER,Factory Manager,Reads all operational data and performs management functions.,2,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+9bb5ce70-d69e-503b-a547-37fc1abcb1f9,PRODUCTION_SUPERVISOR,Production Supervisor,Viewer access plus production operations.,3,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+5a07f314-ae3d-5743-9b7a-04044a722e81,QUALITY_ENGINEER,Quality Engineer,Viewer access plus quality operations.,4,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+fe10ba05-d8f0-5cde-bf73-dc425f8f1ad6,INVENTORY_MANAGER,Inventory Manager,Viewer access plus inventory operations.,5,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+5ac5d9e8-e38e-51bb-b68f-af8684c15520,VIEWER,Viewer,Reads the dashboard and analytics.,6,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00

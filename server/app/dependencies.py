@@ -20,6 +20,7 @@ from psycopg import AsyncConnection
 
 from app.cache.service import CacheService
 from app.config import Settings, get_settings
+from app.db.csv_store import CsvDatabasePool
 from app.db.pool import DatabasePool
 from app.repositories.alerts import AlertRepository
 from app.repositories.audit import AuditRepository
@@ -50,11 +51,13 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 # =============================================================================
 
 
-def get_pool(request: Request) -> DatabasePool:
+def get_pool(request: Request) -> DatabasePool | CsvDatabasePool:
     """Return the pool created during startup.
 
     Held on `app.state` rather than in a module global so tests can build an
-    application with a different pool without monkeypatching.
+    application with a different pool without monkeypatching. Which backend it
+    is -- PostgreSQL or the in-memory CSV store -- was decided by
+    `DATA_SOURCE` in the lifespan; both expose the same interface.
     """
     return request.app.state.db_pool
 
@@ -64,7 +67,7 @@ def get_cache(request: Request) -> CacheService:
     return request.app.state.cache
 
 
-PoolDep = Annotated[DatabasePool, Depends(get_pool)]
+PoolDep = Annotated[DatabasePool | CsvDatabasePool, Depends(get_pool)]
 CacheDep = Annotated[CacheService, Depends(get_cache)]
 
 

@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
+import duckdb
 import psycopg
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -31,8 +32,9 @@ from app.api.router import api_router
 from app.cache.client import CacheClient, CircuitBreaker, create_redis
 from app.cache.keys import CacheKeys
 from app.cache.service import CacheService
-from app.config import Settings, get_settings
+from app.config import DataSource, Settings, get_settings
 from app.db.connection import DatabaseNotConfiguredError
+from app.db.csv_store import CsvDatabasePool
 from app.db.pool import DatabasePool
 from app.repositories.base import UnknownSortFieldError
 from app.runtime import configure_event_loop_policy
@@ -115,7 +117,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     settings = get_settings()
 
-    pool = DatabasePool(settings)
+    # The CSV store and the PostgreSQL pool share one interface, so nothing
+    # past this line knows which backend is serving the repositories.
+    pool: CsvDatabasePool | DatabasePool
+    if settings.data_source is DataSource.CSV:
+        pool = CsvDatabasePool(settings)
+    else:
+        pool = DatabasePool(settings)
     await pool.open()
     app.state.db_pool = pool
 
@@ -140,6 +148,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "environment": settings.app_env.value,
             "version": __version__,
             "cache_enabled": cache_client.enabled,
+            "data_source": settings.data_source.value,
             "database_configured": pool.is_open,
             "google_oauth_configured": is_configured(settings),
         },
@@ -507,13 +516,16 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(psycopg.Error)
-    async def database_error_handler(request: Request, exc: psycopg.Error) -> JSONResponse:
-        """Any database failure.
+    @app.exception_handler(duckdb.Error)
+    async def database_error_handler(
+        request: Request, exc: psycopg.Error | duckdb.Error
+    ) -> JSONResponse:
+        """Any database failure, from either backend.
 
-        A psycopg error message can contain the failing SQL, a column name, or a
-        connection string. None of it reaches the client: `exc_info` sends the
-        detail to the log and the response carries only a code and the request
-        ID (spec section 68).
+        A database error message can contain the failing SQL, a column name, or
+        a connection string. None of it reaches the client: `exc_info` sends
+        the detail to the log and the response carries only a code and the
+        request ID (spec section 68).
         """
         request_id = getattr(request.state, "request_id", None)
         logger.error(

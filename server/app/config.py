@@ -34,6 +34,13 @@ class Environment(str, Enum):
     PRODUCTION = "production"
 
 
+class DataSource(str, Enum):
+    """Backend the repositories read table data from."""
+
+    CSV = "csv"
+    POSTGRES = "postgres"
+
+
 class Settings(BaseSettings):
     """Typed, validated application settings."""
 
@@ -62,6 +69,15 @@ class Settings(BaseSettings):
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
+
+    # -- Data source ----------------------------------------------------------
+    #: Where table data is read from. `csv` loads the exports in
+    #: `supabase_csv_exports/` into an in-memory database at startup and never
+    #: contacts Supabase; `postgres` uses DATABASE_URL as before.
+    data_source: DataSource = DataSource.CSV
+    #: Folder holding one `<table>.csv` per table. Defaults to the export
+    #: folder at the repository root.
+    csv_data_dir: Path = BASE_DIR.parent / "supabase_csv_exports"
 
     # -- Supabase / PostgreSQL (spec section 11) ------------------------------
     # Optional at import time so the app can boot for health checks and tests

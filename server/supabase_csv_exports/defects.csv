@@ -1,0 +1,9 @@
+id,code,name,description,category,default_severity,is_active,created_at,updated_at
+0f645b19-5f04-57d5-ba60-f555d433b5d4,DIMENSIONAL_OOT,Dimensional Out-of-Tolerance,Measured feature falls outside the drawing tolerance band.,Dimensional,MAJOR,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+a13f72c3-10d9-53d0-929b-a9589bfe6c10,SURFACE_DEFECT,Surface Defect,"Scoring, pitting or tool marks on a finished face.",Surface,MINOR,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+88f629e4-f7fa-5440-9651-b7118d2f915e,BURR,Burr,Residual material left at an edge after machining.,Surface,MINOR,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+253e6e80-9c2a-565e-9f13-a0ad19bdc5a0,CRACK,Crack,Visible or detected crack; the part is scrapped.,Structural,CRITICAL,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+71e55ab2-29fa-562c-9199-ccdbf08d78e5,THREAD_DAMAGE,Thread Damage,"Stripped, crossed or incomplete thread form.",Dimensional,MAJOR,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+c5eeea76-eb37-5705-8ac9-d045198f1d39,MATERIAL_DEFECT,Material Defect,"Inclusion, porosity or incorrect material grade.",Material,CRITICAL,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+22de1ac2-ec39-5ecd-af35-4d1c0a03576e,INCORRECT_ASSEMBLY,Incorrect Assembly,Component assembled out of sequence or with the wrong part.,Assembly,MAJOR,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+c918f298-fd4c-5f99-abdc-7a16ae58d0cb,HEAT_TREATMENT_FAILURE,Heat Treatment Failure,Hardness or case depth outside specification after treatment.,Process,CRITICAL,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00

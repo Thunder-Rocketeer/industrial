@@ -34,6 +34,15 @@ psycopg[binary]==3.3.5
 psycopg-pool==3.3.1
 
 # ------------------------------------------------------------------------------
+# CSV data source (DATA_SOURCE=csv)
+# ------------------------------------------------------------------------------
+# Embedded SQL engine that loads supabase_csv_exports/*.csv into memory and runs
+# the repositories' PostgreSQL-dialect queries unchanged. pytz is required by
+# DuckDB to return timezone-aware timestamps.
+duckdb==1.5.5
+pytz==2026.3.post1
+
+# ------------------------------------------------------------------------------
 # Redis / Caching / Rate Limiting
 # ------------------------------------------------------------------------------
 redis==8.1.0

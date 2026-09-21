@@ -1,10 +1,37 @@
 # ==============================================================================
 # Tooling configuration for the FastAPI backend.
 #
-# Dependencies are declared in requirements.txt rather than here: the project is
-# an application, not a distributable package, so a plain pinned requirements
-# file keeps the install path obvious.
+# Dependencies for local development are declared in requirements.txt (pinned).
+# The [project] table below mirrors the *runtime* subset of those pins for
+# Vercel, whose Python builder installs from pyproject.toml with uv. Test and
+# lint tools, the Gunicorn/uvicorn process managers and the supabase SDK (never
+# imported at runtime) are deliberately absent so they stay out of the function
+# bundle. Keep the two files in step when bumping a version.
 # ==============================================================================
+
+[project]
+name = "acf-dashboard-api"
+version = "0.1.0"
+description = "Automobile Component Factory - production, quality and inventory API"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.141.1",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "psycopg[binary]==3.3.5",
+    "psycopg-pool==3.3.1",
+    "duckdb==1.5.5",
+    "pytz==2026.3.post1",
+    "redis==8.1.0",
+    "slowapi==0.1.10",
+    "authlib==1.8.0",
+    "cryptography==50.0.1",
+    "PyJWT==2.13.0",
+    "itsdangerous==2.2.0",
+    "httpx==0.28.1",
+    "python-multipart==0.0.32",
+    "python-dotenv==1.2.3",
+]
 
 [tool.ruff]
 line-length = 100
@@ -88,3 +115,10 @@ markers = [
     "security: tests covering authentication, authorization, injection, XSS, CSRF and rate limiting",
     "integration: tests that require a live Supabase or Redis instance",
 ]
+
+# ------------------------------------------------------------------------------
+# Vercel (Python runtime). The FastAPI instance lives in app/main.py; declaring
+# it here keeps the entrypoint explicit rather than relying on auto-detection.
+# ------------------------------------------------------------------------------
+[tool.vercel]
+entrypoint = "app.main:app"

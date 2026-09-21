@@ -1,0 +1,5 @@
+id,code,name,description,is_active,created_at,updated_at
+0a488a58-f45d-550b-8e16-feb5d935622d,LINE-A,Line A - Brake Components,Brake discs and drums.,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+fbe9013d-4e1e-50bd-9c47-83a3bf63b435,LINE-B,Line B - Drivetrain Components,"Shafts, joints and gear blanks.",True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+d0d1c5ae-5804-564b-93f3-4f8197e88acc,LINE-C,Line C - Steering Components,Steering knuckles and wheel hubs.,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00
+d84a9ec1-7b28-54f4-a4a8-a9177fa53327,LINE-D,Line D - Suspension Components,Control arms and brackets.,True,2026-09-06T09:02:29.920757+00:00,2026-09-06T09:02:59.286744+00:00

@@ -42,8 +42,14 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.config import get_settings  # noqa: E402
-from app.security.jwt import issue_access_token  # noqa: E402
+from app.config import DataSource, get_settings
+from app.db.csv_store import load_csv_database
+from app.security.jwt import issue_access_token
+
+_ACTIVE_USERS_SQL = (
+    "select r.code, u.id, u.email, u.full_name from public.users u "
+    "join public.roles r on r.id = u.role_id where u.is_active"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,12 +61,19 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args[0]).resolve()
     settings = get_settings()
 
-    with psycopg.connect(settings.database_url, connect_timeout=20) as conn, conn.cursor() as cur:
-        cur.execute(
-            "select r.code, u.id, u.email, u.full_name from public.users u "
-            "join public.roles r on r.id = u.role_id where u.is_active"
-        )
-        rows = cur.fetchall()
+    # Same source the API reads from, so the minted user ids resolve when the
+    # session cookie is presented.
+    if settings.data_source is DataSource.CSV:
+        db = load_csv_database(Path(settings.csv_data_dir).resolve())
+        rows = db.execute(_ACTIVE_USERS_SQL).fetchall()
+        db.close()
+    else:
+        with (
+            psycopg.connect(settings.database_url, connect_timeout=20) as conn,
+            conn.cursor() as cur,
+        ):
+            cur.execute(_ACTIVE_USERS_SQL)
+            rows = cur.fetchall()
 
     if not rows:
         print("No active users. Run `python -m app.db.seed` first.", file=sys.stderr)
