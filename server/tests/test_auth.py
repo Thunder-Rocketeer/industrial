@@ -16,6 +16,7 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import jwt as pyjwt
 import pytest
@@ -68,6 +69,12 @@ def auth_settings() -> Settings:
     it with a function-scoped one is a scope mismatch.
     """
     return Settings(secret_key=TEST_SECRET, _env_file=None)
+
+
+def _frontend_origin(settings: Settings) -> str:
+    """The scheme and host the post-login redirect must land on."""
+    parts = urlsplit(settings.frontend_login_success_url)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 @pytest.fixture
@@ -670,9 +677,9 @@ def test_an_open_redirect_attempt_is_refused(target: str, auth_settings: Setting
 )
 def test_a_legitimate_path_is_accepted(target: str, auth_settings: Settings) -> None:
     resolved = resolve_post_login_redirect(target, auth_settings)
+    assert resolved.startswith(_frontend_origin(auth_settings))
 
     assert resolved.endswith(target)
-    assert resolved.startswith("http://localhost:3000")
 
 
 @pytest.mark.security
@@ -681,7 +688,7 @@ def test_the_redirect_origin_always_comes_from_configuration(
 ) -> None:
     """A caller supplies a path; the origin is never theirs to choose."""
     assert resolve_post_login_redirect("/anything", auth_settings).startswith(
-        "http://localhost:3000"
+        _frontend_origin(auth_settings)
     )
 
 

@@ -7,9 +7,10 @@
 # back to, the same site (client/next.config.ts explains the mechanism).
 #
 # The service's public configuration -- hostnames, feature switches, the data
-# source -- is committed in server/render.env, which the backend reads on its
-# own whenever it runs on Render. Only the secrets are declared here, and
-# `sync: false` means Render prompts for them rather than reading this file.
+# source -- is the set of defaults in server/app/config.py, so the backend
+# needs nothing from the platform but its secrets. Those are declared here,
+# and `sync: false` means Render prompts for them rather than reading this
+# file.
 #
 # Docs: https://render.com/docs/blueprint-spec
 # ==============================================================================
@@ -37,7 +38,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"
-      # Everything else lives in server/render.env. These three never can.
+      # Everything else is a default in server/app/config.py. These never can be.
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET

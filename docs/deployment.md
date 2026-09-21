@@ -47,18 +47,17 @@ match it by hand in the dashboard:
 | Start | `gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:$PORT` |
 | Health check path | `/api/v1/health/live` |
 
-### Configuration is in the repository
+### Configuration is in the code
 
-The service's public configuration is committed in
-[`server/render.env`](../server/render.env): `APP_ENV=production`, the data
-source, the cookie flags, the Redis switches, and every URL that names the
-Vercel domain (`CORS_ALLOWED_ORIGINS`, `GOOGLE_REDIRECT_URI`,
-`FRONTEND_LOGIN_*_URL`). The backend reads that file by itself whenever it
-runs on Render -- it checks for the `RENDER` variable Render sets on every
-service (`server/app/config.py`, `_env_files`). Local development never loads
-it. To move to a new frontend domain, edit the file and push.
+The service's public configuration is the **defaults** in
+[`server/app/config.py`](../server/app/config.py): `APP_ENV=production`, the
+CSV data source, the cookie flags, the Redis switches, and every URL that
+names the Vercel domain (`CORS_ALLOWED_ORIGINS`, `GOOGLE_REDIRECT_URI`,
+`FRONTEND_LOGIN_*_URL`). A deployment therefore needs no environment beyond
+its secrets. To move to a new frontend domain, change those defaults and push.
+Local development is what overrides them, through `server/.env`.
 
-Anything set in the Render dashboard overrides the file, which is where the
+Anything set in the Render dashboard overrides the code, which is where the
 three values that must never be committed go. Set these under
 **Environment** and nothing else:
 
@@ -76,8 +75,8 @@ one. A missing `SECRET_KEY` is the usual first-deploy failure.
 ### Redis
 
 Not required. Without it the cache is bypassed and the rate limiter fails
-open. When an instance exists, set `REDIS_URL` in the dashboard and flip
-`CACHE_ENABLED` and `RATE_LIMIT_ENABLED` to `true` in `server/render.env`.
+open. When an instance exists, set `REDIS_URL`, `CACHE_ENABLED=true` and
+`RATE_LIMIT_ENABLED=true` in the dashboard (or change the defaults).
 
 ### Free-tier note
 

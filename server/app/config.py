@@ -11,7 +11,6 @@ constructing :class:`Settings` directly.
 
 from __future__ import annotations
 
-import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -42,28 +41,25 @@ class DataSource(str, Enum):
     POSTGRES = "postgres"
 
 
-def _env_files() -> tuple[Path, ...]:
-    """The dotenv files to read, lowest precedence first.
-
-    `server/.env` is the developer's local file and is never committed. On
-    Render -- detected by the `RENDER` variable the platform sets on every
-    service -- the committed `server/render.env` is read as well, so the
-    deployment's public configuration (hostnames, feature switches) lives in
-    the repository rather than being retyped into a dashboard. Real
-    environment variables still override both files, which is where the
-    secrets stay.
-    """
-    files = [BASE_DIR / ".env"]
-    if os.environ.get("RENDER"):
-        files.append(BASE_DIR / "render.env")
-    return tuple(files)
-
-
 class Settings(BaseSettings):
-    """Typed, validated application settings."""
+    """Typed, validated application settings.
+
+    DEFAULTS ARE THE PRODUCTION DEPLOYMENT
+
+    Every default below describes the hosted service: the backend on Render,
+    the frontend on Vercel at `industrial-ui.vercel.app`, the CSV exports as the
+    data source, no Redis. A deployment therefore needs no configuration beyond
+    its three secrets (`SECRET_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`),
+    which are the only values that must never be committed.
+
+    Local development is the case that overrides: `server/.env` (copied from
+    `.env.example`) turns the environment back to `development`, points every
+    URL at localhost and drops `COOKIE_SECURE`. Without that file the process
+    starts in production mode and, correctly, refuses to run without a secret.
+    """
 
     model_config = SettingsConfigDict(
-        env_file=_env_files(),
+        env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         # Tolerate unrelated variables in the shell environment.
@@ -72,7 +68,7 @@ class Settings(BaseSettings):
 
     # -- Application ----------------------------------------------------------
     app_name: str = "Automobile Component Factory API"
-    app_env: Environment = Environment.DEVELOPMENT
+    app_env: Environment = Environment.PRODUCTION
     debug: bool = False
     api_v1_prefix: str = "/api/v1"
     host: str = "0.0.0.0"  # noqa: S104 - binding all interfaces is intended for containers
@@ -85,7 +81,7 @@ class Settings(BaseSettings):
     # types, so the validator below can accept a plain comma-separated string --
     # which is the only practical way to express a list in a .env file.
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
+        default_factory=lambda: ["https://industrial-ui.vercel.app"]
     )
 
     # -- Data source ----------------------------------------------------------
@@ -127,7 +123,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     #: Master switch. Disabling it makes every read go to the database, which is
     #: the correct behaviour for a test run and a useful production kill switch.
-    cache_enabled: bool = True
+    cache_enabled: bool = False
     cache_key_prefix: str = "acf"
     cache_ttl_dashboard: int = Field(default=30, ge=0)
     cache_ttl_trends: int = Field(default=300, ge=0)
@@ -165,7 +161,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(default=7, ge=1, le=90)
 
     # -- Cookies (spec sections 7 and 55.4) -----------------------------------
-    cookie_secure: bool = False
+    cookie_secure: bool = True
     cookie_samesite: str = "lax"
     cookie_domain: str = ""
     session_cookie_name: str = "acf_session"
@@ -190,13 +186,18 @@ class Settings(BaseSettings):
     # -- Google OAuth 2.0 / OIDC (spec section 54.2) --------------------------
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+    # The frontend proxies /api/* to this service, so the callback is on the
+    # Vercel host (docs/deployment.md section 1). Registered verbatim in the
+    # Google Cloud Console.
+    google_redirect_uri: str = "https://industrial-ui.vercel.app/api/v1/auth/google/callback"
     google_oidc_issuer: str = "https://accounts.google.com"
-    frontend_login_success_url: str = "http://localhost:3000/dashboard"
-    frontend_login_failure_url: str = "http://localhost:3000/login?error=auth_failed"
+    frontend_login_success_url: str = "https://industrial-ui.vercel.app/dashboard"
+    frontend_login_failure_url: str = "https://industrial-ui.vercel.app/login?error=auth_failed"
 
     # -- Rate limiting (spec section 60) --------------------------------------
-    rate_limit_enabled: bool = True
+    #: Off until a Redis instance exists: the limiter fails open without one
+    #: anyway, but logs a warning on every request while doing so.
+    rate_limit_enabled: bool = False
     rate_limit_oauth: str = "10/minute"
     rate_limit_authenticated: str = "120/minute"
     rate_limit_analytics: str = "30/minute"
