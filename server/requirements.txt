@@ -24,9 +24,8 @@ pydantic==2.13.5
 pydantic-settings==2.15.0
 
 # ------------------------------------------------------------------------------
-# Supabase / PostgreSQL
+# PostgreSQL (DATA_SOURCE=postgres)
 # ------------------------------------------------------------------------------
-supabase==2.31.0
 psycopg[binary]==3.3.5
 # Async connection pooling. One pool per worker amortises the TCP, TLS and
 # authentication round trips that otherwise dominate a fast aggregate query
@@ -46,7 +45,6 @@ pytz==2026.3.post1
 # Redis / Caching / Rate Limiting
 # ------------------------------------------------------------------------------
 redis==8.1.0
-slowapi==0.1.10
 
 # ------------------------------------------------------------------------------
 # Authentication & Security
@@ -55,7 +53,6 @@ authlib==1.8.0
 cryptography==50.0.1
 PyJWT==2.13.0
 itsdangerous==2.2.0
-passlib[bcrypt]==1.7.4
 
 # ------------------------------------------------------------------------------
 # HTTP / API

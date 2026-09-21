@@ -3,10 +3,10 @@
 #
 # Dependencies for local development are declared in requirements.txt (pinned).
 # The [project] table below mirrors the *runtime* subset of those pins for
-# Vercel, whose Python builder installs from pyproject.toml with uv. Test and
-# lint tools, the Gunicorn/uvicorn process managers and the supabase SDK (never
-# imported at runtime) are deliberately absent so they stay out of the function
-# bundle. Keep the two files in step when bumping a version.
+# hosts that install from pyproject.toml (uv, Vercel's Python builder). Test
+# and lint tools and the Gunicorn/uvicorn process managers are deliberately
+# absent so they stay out of the bundle. Keep the two files in step when
+# bumping a version.
 # ==============================================================================
 
 [project]
@@ -23,7 +23,6 @@ dependencies = [
     "duckdb==1.5.5",
     "pytz==2026.3.post1",
     "redis==8.1.0",
-    "slowapi==0.1.10",
     "authlib==1.8.0",
     "cryptography==50.0.1",
     "PyJWT==2.13.0",

@@ -1,0 +1,36 @@
+# Files never uploaded by `vercel deploy` (Git deployments use the repo tree).
+# Secrets first, then everything that is not needed to build or run.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+
+.git
+.claude
+.playwright-mcp
+artifacts
+docs
+supabase
+*.md
+
+node_modules
+.next
+.vercel
+*.tsbuildinfo
+client/e2e
+client/tests
+client/playwright-report
+client/blob-report
+client/test-results
+
+# The backend is hosted on Render (render.yaml); Vercel builds only client/.
+server
+render.yaml
+__pycache__
+.pytest_cache
+.ruff_cache

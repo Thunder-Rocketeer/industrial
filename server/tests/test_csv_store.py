@@ -1,6 +1,6 @@
 """The CSV-backed data source (`app.db.csv_store`).
 
-These load the real export folder at the repository root, so they also prove
+These load the real export folder in `server/supabase_csv_exports`, so they also prove
 the checked-in CSVs still match the schema the repositories expect. They run in
 well under a second: the largest file is 2.4 MB.
 """
@@ -32,7 +32,7 @@ from app.repositories.machines import MachineRepository
 from app.repositories.production import ProductionRepository
 from app.repositories.users import UserRepository
 
-EXPORT_DIR = BASE_DIR.parent / "supabase_csv_exports"
+EXPORT_DIR = BASE_DIR / "supabase_csv_exports"
 
 pytestmark = pytest.mark.skipif(
     not EXPORT_DIR.is_dir(), reason="supabase_csv_exports/ is not present"

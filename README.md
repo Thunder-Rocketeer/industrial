@@ -36,6 +36,7 @@ which is the authoritative document for this project.
 > [`docs/security-headers.md`](./docs/security-headers.md) ·
 > [`docs/e2e-verification.md`](./docs/e2e-verification.md) ·
 > [`docs/production-readiness.md`](./docs/production-readiness.md) ·
+> [`docs/deployment.md`](./docs/deployment.md) ·
 > [`docs/architecture.md`](./docs/architecture.md) ·
 > [`docs/implementation-plan.md`](./docs/implementation-plan.md)
 
@@ -177,7 +178,8 @@ Grouped by concern; see `server/.env.example` for the full annotated list.
 |---|---|
 | Application | `APP_NAME` `APP_ENV` `DEBUG` `API_V1_PREFIX` `HOST` `PORT` `WORKERS` `LOG_LEVEL` |
 | CORS | `CORS_ALLOWED_ORIGINS` (comma-separated; a wildcard is rejected) |
-| Supabase | `SUPABASE_URL` `SUPABASE_ANON_KEY` `SUPABASE_SERVICE_ROLE_KEY` `DATABASE_URL` |
+| Data source | `DATA_SOURCE` (`csv`, the default, or `postgres`) `CSV_DATA_DIR` |
+| Supabase | `SUPABASE_URL` `SUPABASE_ANON_KEY` `SUPABASE_SERVICE_ROLE_KEY` `DATABASE_URL` (only with `DATA_SOURCE=postgres`) |
 | Redis | `REDIS_URL` `CACHE_TTL_DASHBOARD` `CACHE_TTL_TRENDS` `CACHE_TTL_ANALYTICS` `CACHE_TTL_REFERENCE` |
 | Security | `SECRET_KEY` `JWT_ALGORITHM` `JWT_ISSUER` `JWT_AUDIENCE` `ACCESS_TOKEN_EXPIRE_MINUTES` `COOKIE_SECURE` `COOKIE_SAMESITE` `COOKIE_DOMAIN` `SESSION_COOKIE_NAME` `CSRF_COOKIE_NAME` |
 | Auth policy | `AUTH_ALLOWED_EMAIL_DOMAINS` `AUTH_ALLOWED_EMAILS` `AUTH_AUTO_PROVISION` `AUTH_DEFAULT_ROLE` |
@@ -196,6 +198,20 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 > variable, or in a browser response.
 
 ---
+
+## Data source
+
+By default (`DATA_SOURCE=csv`) the API reads its table data from the CSV
+exports in [`server/supabase_csv_exports/`](./server/supabase_csv_exports) -- one file per
+table -- and never contacts Supabase. At startup the files are loaded into an
+in-memory DuckDB database with the same table names, columns and types as the
+PostgreSQL schema, and the repositories run their existing SQL against it
+(`server/app/db/csv_store.py`). Writes made while the server runs -- audit
+entries, login bookkeeping -- stay in memory; the CSV files are never modified.
+
+To re-export, drop fresh `<table>.csv` files into that folder (or point
+`CSV_DATA_DIR` elsewhere) and restart the server. To query Supabase directly
+instead, set `DATA_SOURCE=postgres` and follow the setup below.
 
 ## Supabase setup
 
@@ -466,9 +482,16 @@ Never use `--reload` in production.
 ## Deployment notes
 
 ```
-Browser  ->  Next.js  ->  FastAPI / Gunicorn  ->  Redis + Supabase
+Browser  ->  Vercel (Next.js, proxies /api/*)  ->  Render (FastAPI / Gunicorn)  ->  CSV exports
 ```
 
+The step-by-step runbook -- Render blueprint, Vercel variables, Google Cloud
+Console entries and a verification checklist -- is
+[`docs/deployment.md`](./docs/deployment.md). The principles:
+
+- Keep the browser on one origin. The frontend proxies `/api/*` to the backend
+  (`API_PROXY_TARGET`); calling a cross-site API directly breaks the cookie
+  session.
 - Serve everything over HTTPS. Set `COOKIE_SECURE=true` and `APP_ENV=production`.
 - Set `CORS_ALLOWED_ORIGINS` to the real frontend origin. A wildcard is rejected
   by configuration validation because requests carry credentials.

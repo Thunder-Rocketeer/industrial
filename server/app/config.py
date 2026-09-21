@@ -75,9 +75,10 @@ class Settings(BaseSettings):
     #: `supabase_csv_exports/` into an in-memory database at startup and never
     #: contacts Supabase; `postgres` uses DATABASE_URL as before.
     data_source: DataSource = DataSource.CSV
-    #: Folder holding one `<table>.csv` per table. Defaults to the export
-    #: folder at the repository root.
-    csv_data_dir: Path = BASE_DIR.parent / "supabase_csv_exports"
+    #: Folder holding one `<table>.csv` per table. Defaults to
+    #: `server/supabase_csv_exports`, which is inside the directory a
+    #: deployment builds from (Render's root directory, the Docker context).
+    csv_data_dir: Path = BASE_DIR / "supabase_csv_exports"
 
     # -- Supabase / PostgreSQL (spec section 11) ------------------------------
     # Optional at import time so the app can boot for health checks and tests

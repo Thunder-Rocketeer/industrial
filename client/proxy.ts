@@ -122,11 +122,20 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   /**
-   * Everything except Next.js internals, static assets and the favicon.
+   * Everything except the API, Next.js internals, static assets and the
+   * favicon.
+   *
+   * `/api` is excluded because when `API_PROXY_TARGET` is set (next.config.ts)
+   * those requests are rewritten to the backend, which authenticates them
+   * itself and must be reachable without a session: the sign-in endpoints are
+   * the ones that *create* it. Gating them here would bounce the OAuth start
+   * to the login page, and sign-in could never begin.
    *
    * Running on `_next/static` would add a redirect check to every chunk
    * request, and running on an image would break it for a signed-out user on
    * the login page.
    */
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: [
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

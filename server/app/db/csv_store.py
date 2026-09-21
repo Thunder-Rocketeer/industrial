@@ -1,4 +1,4 @@
-"""In-process database loaded from the CSV exports in `supabase_csv_exports/`.
+"""In-process database loaded from the CSV exports in `server/supabase_csv_exports/`.
 
 A drop-in replacement for `app.db.pool.DatabasePool` that never talks to
 Supabase. At startup every CSV in the export folder is loaded into an in-memory
