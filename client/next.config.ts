@@ -17,7 +17,7 @@ import type { NextConfig } from "next";
  * at a backend started with `python -m app` for a fully local run. It defaults
  * to the hosted deployment, so a build with no override behaves as before.
  */
-const API_PROXY_TARGET = process.env.API_PROXY_TARGET ?? "https://industrial-1-807h.onrender.com";
+const API_PROXY_TARGET = process.env.API_PROXY_TARGET ?? "https://industrial-2.onrender.com/";
 
 const nextConfig: NextConfig = {
   // Surfaces unsafe lifecycles and side effects during development.
