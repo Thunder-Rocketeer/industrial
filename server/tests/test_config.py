@@ -86,6 +86,36 @@ def test_access_token_lifetime_is_bounded() -> None:
         Settings(access_token_expire_minutes=1440, _env_file=None)
 
 
+def test_local_development_points_at_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The local flag is what a developer machine uses. Render must not be set."""
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("LOCAL_DEVELOPMENT", "true")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.local_development is True
+    assert settings.app_env is Environment.DEVELOPMENT
+    assert settings.google_redirect_uri == "http://localhost:8000/api/v1/auth/google/callback"
+    assert settings.frontend_login_success_url == "http://localhost:3000/dashboard"
+
+
+def test_render_ignores_local_development(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hosted service keeps the Vercel callback even if the local flag is set."""
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("LOCAL_DEVELOPMENT", "true")
+    monkeypatch.setenv("SECRET_KEY", "t" * 64)
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/v1/auth/google/callback")
+    monkeypatch.setenv("FRONTEND_LOGIN_SUCCESS_URL", "http://localhost:3000/dashboard")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.local_development is False
+    assert settings.app_env is Environment.PRODUCTION
+    assert settings.google_redirect_uri == f"{FRONTEND_ORIGIN}/api/v1/auth/google/callback"
+    assert settings.frontend_login_success_url == f"{FRONTEND_ORIGIN}/dashboard"
+    assert settings.cookie_secure is True
+
+
 def test_docs_are_disabled_in_production() -> None:
     """Spec section 40: OpenAPI docs are a development affordance."""
     production = Settings(**SECURE_PRODUCTION, _env_file=None)

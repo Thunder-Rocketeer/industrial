@@ -11,6 +11,7 @@ constructing :class:`Settings` directly.
 
 from __future__ import annotations
 
+import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -135,6 +136,8 @@ class Settings(BaseSettings):
     #: This is the one way to move the fixed fields off their production
     #: values, and it moves all of them together so a half-local configuration
     #: (production cookies, localhost callback) cannot be assembled.
+    #: Ignored when Render sets ``RENDER=true``, so a copied local ``.env``
+    #: cannot send the hosted Google callback to localhost.
     local_development: bool = False
     app_name: str = "Automobile Component Factory API"
     app_env: Environment = Environment.PRODUCTION
@@ -376,6 +379,10 @@ class Settings(BaseSettings):
         """
         if not isinstance(data, dict):
             return data
+        # Render injects RENDER=true on every service. A dashboard copy of
+        # server/.env would otherwise flip the live callback to localhost.
+        if os.environ.get("RENDER", "").strip().lower() == "true":
+            return {**data, "local_development": False}
         flag = data.get("local_development", False)
         if isinstance(flag, str):
             flag = flag.strip().lower() in {"1", "true", "yes", "on"}
