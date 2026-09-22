@@ -45,6 +45,25 @@ class DataSource(str, Enum):
 #: post-login redirects are all derived from this host.
 FRONTEND_ORIGIN = "https://industrial-ui.vercel.app"
 
+#: Where the two dev servers listen when the project runs on one machine
+#: (`npm run dev` and `python -m app`). Only used with LOCAL_DEVELOPMENT=true.
+LOCAL_FRONTEND_ORIGIN = "http://localhost:3000"
+LOCAL_BACKEND_ORIGIN = "http://localhost:8000"
+
+#: The values the fixed fields take under LOCAL_DEVELOPMENT=true. The callback
+#: is on the backend host, not the frontend one: `http://localhost` cookies
+#: ignore the port, so a cookie set by :8000 is sent to :3000 as well, and this
+#: exact URI is already registered in the Google Cloud Console.
+_LOCAL_DEVELOPMENT_VALUES: dict[str, object] = {
+    "app_env": "development",
+    "cors_allowed_origins": [LOCAL_FRONTEND_ORIGIN],
+    "google_redirect_uri": f"{LOCAL_BACKEND_ORIGIN}/api/v1/auth/google/callback",
+    "frontend_login_success_url": f"{LOCAL_FRONTEND_ORIGIN}/dashboard",
+    "frontend_login_failure_url": f"{LOCAL_FRONTEND_ORIGIN}/login?error=auth_failed",
+    "cookie_secure": False,
+    "cache_enabled": False,
+}
+
 #: Field names that stay at their code defaults. `server/.env` and the process
 #: environment cannot change them.
 _FIXED_FIELDS = frozenset(
@@ -112,6 +131,11 @@ class Settings(BaseSettings):
         )
 
     # -- Application ----------------------------------------------------------
+    #: Run against the two local dev servers instead of the hosted deployment.
+    #: This is the one way to move the fixed fields off their production
+    #: values, and it moves all of them together so a half-local configuration
+    #: (production cookies, localhost callback) cannot be assembled.
+    local_development: bool = False
     app_name: str = "Automobile Component Factory API"
     app_env: Environment = Environment.PRODUCTION
     debug: bool = False
@@ -340,6 +364,24 @@ class Settings(BaseSettings):
         if upper not in allowed:
             raise ValueError(f"LOG_LEVEL must be one of {sorted(allowed)}")
         return upper
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_local_development(cls, data: object) -> object:
+        """Swap the fixed production values for localhost when asked to.
+
+        The fixed fields never reach this point from the environment (see
+        `_EnvWithoutFixedFields`), so setting them here is the only way they
+        change. Explicit constructor arguments, which the tests use, still win.
+        """
+        if not isinstance(data, dict):
+            return data
+        flag = data.get("local_development", False)
+        if isinstance(flag, str):
+            flag = flag.strip().lower() in {"1", "true", "yes", "on"}
+        if not flag:
+            return data
+        return {**_LOCAL_DEVELOPMENT_VALUES, **data}
 
     @model_validator(mode="after")
     def _fail_closed_in_production(self) -> Settings:

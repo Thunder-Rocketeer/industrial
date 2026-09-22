@@ -12,8 +12,12 @@ import type { NextConfig } from "next";
  * concerned. Rewriting `/api/*` keeps the browser on one origin: the cookie
  * is set here, sent back here, and the API never sees the difference.
  * `NEXT_PUBLIC_API_BASE_URL` must stay the root-relative `/api/v1`.
+ *
+ * `API_PROXY_TARGET` (server-side only, never `NEXT_PUBLIC_`) points the proxy
+ * at a backend started with `python -m app` for a fully local run. It defaults
+ * to the hosted deployment, so a build with no override behaves as before.
  */
-const API_PROXY_TARGET = "https://industrial-1-807h.onrender.com";
+const API_PROXY_TARGET = process.env.API_PROXY_TARGET ?? "https://industrial-1-807h.onrender.com";
 
 const nextConfig: NextConfig = {
   // Surfaces unsafe lifecycles and side effects during development.
